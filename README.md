@@ -2,7 +2,7 @@
 
 **Security testing made simple.** Record once, test with payloads, find vulnerabilities.
 
-[![CI](https://github.com/rawlab-dev/vulcn/actions/workflows/ci.yml/badge.svg)](https://github.com/rawlab-dev/vulcn/actions/workflows/ci.yml)
+[![CI](https://github.com/vulcnize/vulcn/actions/workflows/ci.yml/badge.svg)](https://github.com/vulcnize/vulcn/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/vulcn.svg)](https://www.npmjs.com/package/vulcn)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 

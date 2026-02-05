@@ -25,4 +25,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `vulcn doctor` - Check browser availability
 - `vulcn install` - Install Playwright browsers
 
-[0.1.0]: https://github.com/rawlab-dev/vulcn/releases/tag/v0.1.0
+[0.1.0]: https://github.com/vulcnize/vulcn/releases/tag/v0.1.0

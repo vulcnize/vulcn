@@ -43,12 +43,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/rawlab-dev/vulcn.git",
+    "url": "git+https://github.com/vulcnize/vulcn.git",
     "directory": "cli"
   },
   "homepage": "https://rawlab.dev/vulcn",
   "bugs": {
-    "url": "https://github.com/rawlab-dev/vulcn/issues"
+    "url": "https://github.com/vulcnize/vulcn/issues"
   },
   "engines": {
     "node": ">=18.0.0"

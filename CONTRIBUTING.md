@@ -7,7 +7,7 @@ Thank you for your interest in contributing to Vulcn! 🎉
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/rawlab-dev/vulcn.git
+   git clone https://github.com/vulcnize/vulcn.git
    cd vulcn
    ```
 
