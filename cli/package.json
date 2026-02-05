@@ -40,7 +40,7 @@
     "automation"
   ],
   "author": "rawlab",
-  "license": "MIT",
+  "license": "AGPL-3.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vulcnize/vulcn.git",
