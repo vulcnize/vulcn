@@ -1,0 +1,70 @@
+{
+  "name": "@vulcn/engine",
+  "version": "0.1.0",
+  "description": "Security testing engine - Browser recording and payload injection for vulnerability detection",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "clean": "rm -rf dist CHANGELOG.md LICENSE README.md",
+    "typecheck": "tsc --noEmit",
+    "prepack": "cp ../CHANGELOG.md ../LICENSE ../README.md .",
+    "postpack": "rm -f CHANGELOG.md LICENSE README.md",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "vulcn",
+    "security",
+    "testing",
+    "recorder",
+    "playwright",
+    "browser",
+    "automation",
+    "xss",
+    "sql-injection",
+    "penetration-testing"
+  ],
+  "author": "rawlab",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rawlab-dev/vulcn.git",
+    "directory": "src"
+  },
+  "homepage": "https://rawlab.dev/vulcn",
+  "bugs": {
+    "url": "https://github.com/rawlab-dev/vulcn/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "playwright": "^1.50.0",
+    "yaml": "^2.7.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsup": "^8.4.0",
+    "@types/node": "^22.0.0"
+  }
+}

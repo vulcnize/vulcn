@@ -1,0 +1,72 @@
+# Dependencies
+node_modules/
+**/node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+src/dist/
+cli/dist/
+*.bun-build
+**/*.bun-build
+
+# Prepack artifacts (copied during npm pack)
+src/CHANGELOG.md
+src/LICENSE
+src/README.md
+cli/CHANGELOG.md
+cli/LICENSE
+cli/README.md
+cli/vulcn.mjs
+
+# Test outputs
+coverage/
+
+# Lock files (use pnpm-lock.yaml only)
+bun.lock
+bun.lockb
+package-lock.json
+yarn.lock
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-*
+
+# OS
+.DS_Store
+**/.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Session files (test artifacts)
+*.vulcn.yml
+!examples/*.vulcn.yml
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local
+.local/
+.worktrees/
+
+# Playwright
+playwright-report/
+test-results/
+
+# TypeScript
+*.tsbuildinfo
+
+# Secrets baseline (if using detect-secrets)
+# .secrets.baseline

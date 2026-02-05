@@ -1,0 +1,75 @@
+{
+  "name": "vulcn",
+  "version": "0.1.0",
+  "description": "Security testing CLI - Record once, test with payloads, find vulnerabilities",
+  "type": "module",
+  "bin": {
+    "vulcn": "./vulcn.mjs"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "vulcn.mjs",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "clean": "rm -rf dist vulcn.mjs LICENSE README.md CHANGELOG.md",
+    "typecheck": "tsc --noEmit",
+    "prepack": "cp ../vulcn.mjs ../LICENSE ../README.md ../CHANGELOG.md .",
+    "postpack": "rm -f vulcn.mjs LICENSE README.md CHANGELOG.md",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "vulcn",
+    "security",
+    "testing",
+    "cli",
+    "recorder",
+    "xss",
+    "sql-injection",
+    "penetration-testing",
+    "pentest",
+    "vulnerability",
+    "scanner",
+    "playwright",
+    "browser",
+    "automation"
+  ],
+  "author": "rawlab",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rawlab-dev/vulcn.git",
+    "directory": "cli"
+  },
+  "homepage": "https://rawlab.dev/vulcn",
+  "bugs": {
+    "url": "https://github.com/rawlab-dev/vulcn/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@vulcn/engine": "workspace:*",
+    "commander": "^13.1.0",
+    "chalk": "^5.4.0",
+    "ora": "^8.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsup": "^8.4.0",
+    "@types/node": "^22.0.0"
+  }
+}
