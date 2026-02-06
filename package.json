@@ -1,24 +1,40 @@
 {
-  "name": "vulcn-monorepo",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Vulcn - Security testing recorder & runner",
+  "name": "@vulcn/engine",
+  "version": "0.2.0",
+  "description": "Security testing engine - Browser recording and payload injection for vulnerability detection",
   "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
-    "build": "pnpm -r build",
-    "dev": "pnpm -r --parallel dev",
-    "clean": "pnpm -r clean && rm -rf node_modules",
-    "typecheck": "pnpm -r typecheck",
+    "build": "tsup && pnpm -r --filter=\"!@vulcn/engine\" build",
+    "build:engine": "tsup",
+    "dev": "tsup --watch",
+    "clean": "rm -rf dist && pnpm -r clean",
+    "typecheck": "tsc --noEmit && pnpm -r typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "lint": "oxlint --ignore-pattern '**/dist/**' src cli",
-    "lint:fix": "oxlint --fix --ignore-pattern '**/dist/**' src cli",
+    "lint": "oxlint --ignore-pattern '**/dist/**' src cli plugins",
+    "lint:fix": "oxlint --fix --ignore-pattern '**/dist/**' src cli plugins",
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
     "check": "pnpm build && pnpm typecheck && pnpm lint && pnpm test",
     "vulcn": "node vulcn.mjs",
-    "prepack": "pnpm build",
+    "prepublishOnly": "pnpm build:engine",
     "changeset": "changeset",
     "release:version": "changeset version",
     "release:publish": "pnpm build && changeset publish",
@@ -28,8 +44,10 @@
     "vulcn",
     "security",
     "testing",
-    "cli",
     "recorder",
+    "playwright",
+    "browser",
+    "automation",
     "xss",
     "sql-injection",
     "penetration-testing"
@@ -47,12 +65,23 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "packageManager": "pnpm@9.15.0",
+  "dependencies": {
+    "playwright": "^1.50.0",
+    "yaml": "^2.7.0",
+    "zod": "^3.24.0"
+  },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",
+    "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^2.1.0",
     "oxlint": "^0.15.0",
     "prettier": "^3.4.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.7.0",
     "vitest": "^2.1.0"
   },
   "vitest": {

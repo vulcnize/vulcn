@@ -1,4 +1,4 @@
 packages:
-  - "src"
-  - "cli"
-  - "plugins/*"
+  - .
+  - cli
+  - plugins/*
