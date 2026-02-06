@@ -1,7 +1,7 @@
 {
   "name": "@vulcn/engine",
   "version": "0.2.0",
-  "description": "Security testing engine - Browser recording and payload injection for vulnerability detection",
+  "description": "Security testing engine - Driver-based recording and payload injection for vulnerability detection",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -28,8 +28,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "lint": "oxlint --ignore-pattern '**/dist/**' src cli plugins",
-    "lint:fix": "oxlint --fix --ignore-pattern '**/dist/**' src cli plugins",
+    "lint": "oxlint --ignore-pattern '**/dist/**' src cli plugins drivers",
+    "lint:fix": "oxlint --fix --ignore-pattern '**/dist/**' src cli plugins drivers",
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
     "check": "pnpm build && pnpm typecheck && pnpm lint && pnpm test",
@@ -45,8 +45,8 @@
     "security",
     "testing",
     "recorder",
-    "playwright",
-    "browser",
+    "driver",
+    "plugin",
     "automation",
     "xss",
     "sql-injection",
@@ -83,35 +83,5 @@
     "tsup": "^8.5.1",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
-  },
-  "vitest": {
-    "coverage": {
-      "provider": "v8",
-      "reporter": [
-        "text",
-        "lcov"
-      ],
-      "thresholds": {
-        "lines": 70,
-        "functions": 70,
-        "branches": 70,
-        "statements": 70
-      },
-      "include": [
-        "src/**/*.ts"
-      ],
-      "exclude": [
-        "src/**/*.test.ts",
-        "**/dist/**"
-      ]
-    },
-    "include": [
-      "src/**/*.test.ts",
-      "cli/**/*.test.ts"
-    ],
-    "exclude": [
-      "**/dist/**",
-      "**/node_modules/**"
-    ]
   }
 }

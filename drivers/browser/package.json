@@ -1,14 +1,11 @@
 {
-  "name": "@vulcn/plugin-payloads",
-  "version": "0.1.0",
-  "description": "Official payload loader plugin for Vulcn - built-in, PayloadBox, and custom file loading",
+  "name": "@vulcn/driver-browser",
+  "version": "0.0.0",
+  "description": "Browser recording driver for Vulcn - Record and replay web application interactions using Playwright",
   "type": "module",
-  "main": "dist/index.cjs",
-  "module": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "publishConfig": {
-    "access": "public"
-  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": {
@@ -32,30 +29,35 @@
   },
   "keywords": [
     "vulcn",
-    "plugin",
-    "payloads",
-    "xss",
-    "sqli",
-    "security"
+    "driver",
+    "browser",
+    "playwright",
+    "recording",
+    "security",
+    "testing",
+    "web"
   ],
   "author": "rawlab",
   "license": "AGPL-3.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vulcnize/vulcn.git",
-    "directory": "plugins/payloads"
+    "directory": "drivers/browser"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "peerDependencies": {
-    "@vulcn/engine": "^0.2.0"
+    "@vulcn/engine": ">=0.2.0"
+  },
+  "dependencies": {
+    "playwright": "^1.50.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@vulcn/engine": "workspace:*",
-    "tsup": "^8.0.0",
+    "tsup": "^8.4.0",
     "typescript": "^5.7.0"
-  },
-  "dependencies": {
-    "yaml": "^2.4.0",
-    "zod": "^3.24.0"
   }
 }
