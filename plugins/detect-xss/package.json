@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/plugin-detect-xss",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Execution-based XSS detection plugin for Vulcn - detects actual JavaScript execution",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -46,7 +46,7 @@
     "directory": "plugins/detect-xss"
   },
   "peerDependencies": {
-    "@vulcn/engine": ">=0.2.0"
+    "@vulcn/engine": ">=0.3.0"
   },
   "dependencies": {
     "zod": "^3.24.0"
