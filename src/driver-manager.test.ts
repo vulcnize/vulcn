@@ -11,8 +11,8 @@ import type {
   RunResult,
   RecordingHandle,
   Session,
-  Finding,
 } from "./driver-types";
+import type { Finding } from "./types";
 
 // Mock driver for testing
 const createMockDriver = (name: string): VulcnDriver => ({
@@ -131,7 +131,7 @@ describe("DriverManager", () => {
           name: "test",
           version: "1.0",
           stepTypes: [],
-        } as VulcnDriver),
+        } as unknown as VulcnDriver),
       ).toThrow("Driver must define stepTypes");
     });
 
@@ -298,6 +298,7 @@ describe("DriverManager", () => {
               description: "Found during test",
               stepId: "1",
               url: "http://test.com",
+              payload: "<script>alert(1)</script>",
             });
             return {
               findings: ctx.findings,
@@ -344,6 +345,7 @@ describe("DriverManager", () => {
               description: "Test",
               stepId: "1",
               url: "http://test.com",
+              payload: "<script>alert(1)</script>",
             });
             return {
               findings: ctx.findings,

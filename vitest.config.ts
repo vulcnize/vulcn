@@ -4,8 +4,13 @@ export default defineConfig({
   test: {
     testTimeout: 60_000,
     hookTimeout: 60_000,
-    // Use fewer workers on CI to reduce flakiness
-    maxWorkers: process.env.CI ? 2 : undefined,
+    // Use single thread on CI for Windows compatibility
+    pool: "threads",
+    poolOptions: {
+      threads: {
+        singleThread: !!process.env.CI,
+      },
+    },
     include: ["src/**/*.test.ts", "cli/**/*.test.ts", "test/**/*.test.ts"],
     exclude: ["**/node_modules/**", "**/dist/**"],
     setupFiles: ["test/setup.ts"],
