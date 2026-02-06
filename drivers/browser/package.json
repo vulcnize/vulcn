@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/driver-browser",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Browser recording driver for Vulcn - Record and replay web application interactions using Playwright",
   "type": "module",
   "main": "./dist/index.cjs",

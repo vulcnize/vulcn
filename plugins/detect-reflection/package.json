@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/plugin-detect-reflection",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "Pattern-based reflection detection plugin for Vulcn - detects payloads appearing in responses",
   "type": "module",
   "main": "./dist/index.cjs",
