@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/plugin-detect-xss",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Execution-based XSS detection plugin for Vulcn - detects actual JavaScript execution",
   "type": "module",
   "main": "./dist/index.cjs",
