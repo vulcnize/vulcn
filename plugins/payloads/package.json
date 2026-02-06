@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/plugin-payloads",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Security payload loader plugin for Vulcn — curated XSS, SQLi, and injection attack payloads with built-in libraries, PayloadBox integration, and custom payload file support.",
   "type": "module",
   "main": "dist/index.cjs",
