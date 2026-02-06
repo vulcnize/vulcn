@@ -1,7 +1,7 @@
 {
   "name": "@vulcn/plugin-detect-xss",
   "version": "0.2.0",
-  "description": "Execution-based XSS detection plugin for Vulcn - detects actual JavaScript execution",
+  "description": "Execution-based XSS detection plugin for Vulcn — detects real JavaScript execution (alert, confirm, console) rather than pattern matching, for accurate cross-site scripting vulnerability identification.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -33,10 +33,17 @@
     "vulcn",
     "plugin",
     "xss",
-    "detection",
-    "security",
-    "testing",
-    "execution"
+    "xss-detection",
+    "cross-site-scripting",
+    "vulnerability-detection",
+    "security-testing",
+    "penetration-testing",
+    "javascript-injection",
+    "owasp",
+    "owasp-top-10",
+    "web-security",
+    "appsec",
+    "dast"
   ],
   "author": "rawlab",
   "license": "AGPL-3.0",
@@ -44,6 +51,10 @@
     "type": "git",
     "url": "git+https://github.com/vulcnize/vulcn.git",
     "directory": "plugins/detect-xss"
+  },
+  "homepage": "https://docs.vulcn.dev",
+  "bugs": {
+    "url": "https://github.com/vulcnize/vulcn/issues"
   },
   "peerDependencies": {
     "@vulcn/engine": ">=0.3.0"

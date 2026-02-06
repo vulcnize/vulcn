@@ -70,25 +70,26 @@ export class BrowserRunner {
     } | null = null;
 
     // Dialog handler (for alert-based XSS detection)
+    // ANY dialog triggered during payload testing is evidence of XSS execution
     const dialogHandler = async (dialog: Dialog) => {
       if (currentPayloadInfo) {
-        // Check if dialog message matches payload
         const message = dialog.message();
-        if (
-          message.includes("vulcn") ||
-          message === currentPayloadInfo.payloadValue
-        ) {
+        const dialogType = dialog.type();
+
+        // Skip beforeunload dialogs (not XSS-related)
+        if (dialogType !== "beforeunload") {
           eventFindings.push({
             type: "xss",
             severity: "high",
-            title: "XSS Confirmed - Dialog Triggered",
-            description: `JavaScript dialog was triggered by payload injection`,
+            title: `XSS Confirmed - ${dialogType}() triggered`,
+            description: `JavaScript ${dialogType}() dialog was triggered by payload injection. Message: "${message}"`,
             stepId: currentPayloadInfo.stepId,
             payload: currentPayloadInfo.payloadValue,
             url: page.url(),
-            evidence: `Dialog message: ${message}`,
+            evidence: `Dialog type: ${dialogType}, Message: ${message}`,
             metadata: {
-              dialogType: dialog.type(),
+              dialogType,
+              dialogMessage: message,
               detectionMethod: "dialog",
             },
           });
@@ -217,6 +218,11 @@ export class BrowserRunner {
 
   /**
    * Replay session steps with payload injected at target step
+   *
+   * IMPORTANT: We replay ALL steps, not just up to the injectable step.
+   * The injection replaces the input value, but subsequent steps (like
+   * clicking submit) must still execute so the payload reaches the server
+   * and gets reflected back in the response.
    */
   private static async replayWithPayload(
     page: Page,
@@ -228,18 +234,40 @@ export class BrowserRunner {
     // Navigate to start
     await page.goto(startUrl, { waitUntil: "domcontentloaded" });
 
-    // Replay steps
+    let injected = false;
+
+    // Replay ALL steps — inject payload at the target input step,
+    // but continue replaying remaining steps (clicks, navigations)
+    // so forms get submitted and payloads reach the server
     for (const step of session.steps) {
       const browserStep = step as BrowserStep;
 
       try {
         switch (browserStep.type) {
           case "browser.navigate":
+            // Skip post-submission navigates that have session-specific URLs
+            // (they'll happen naturally from form submission)
+            if (injected && browserStep.url.includes("sid=")) {
+              continue;
+            }
             await page.goto(browserStep.url, { waitUntil: "domcontentloaded" });
             break;
 
           case "browser.click":
-            await page.click(browserStep.selector, { timeout: 5000 });
+            // If this click is after injection, wait for potential navigation
+            if (injected) {
+              await Promise.all([
+                page
+                  .waitForNavigation({
+                    waitUntil: "domcontentloaded",
+                    timeout: 5000,
+                  })
+                  .catch(() => {}),
+                page.click(browserStep.selector, { timeout: 5000 }),
+              ]);
+            } else {
+              await page.click(browserStep.selector, { timeout: 5000 });
+            }
             break;
 
           case "browser.input": {
@@ -247,6 +275,9 @@ export class BrowserRunner {
             const value =
               step.id === targetStep.id ? payloadValue : browserStep.value;
             await page.fill(browserStep.selector, value, { timeout: 5000 });
+            if (step.id === targetStep.id) {
+              injected = true;
+            }
             break;
           }
 
@@ -285,14 +316,10 @@ export class BrowserRunner {
       } catch {
         // Step failed, continue to next
       }
-
-      // Stop after target step is injected
-      if (step.id === targetStep.id) {
-        // Wait a bit for any scripts to execute
-        await page.waitForTimeout(100);
-        break;
-      }
     }
+
+    // Wait for any scripts to execute after all steps complete
+    await page.waitForTimeout(500);
   }
 
   /**

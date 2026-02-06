@@ -1,7 +1,7 @@
 {
   "name": "@vulcn/engine",
   "version": "0.3.0",
-  "description": "Security testing engine - Driver-based recording and payload injection for vulnerability detection",
+  "description": "Fast, modern security testing engine — record browser sessions, replay with attack payloads, and detect vulnerabilities automatically. Pluggable driver and detection system for web application penetration testing.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -42,15 +42,22 @@
   },
   "keywords": [
     "vulcn",
-    "security",
-    "testing",
-    "recorder",
-    "driver",
-    "plugin",
-    "automation",
+    "security-testing",
+    "penetration-testing",
+    "pentest",
+    "dast",
+    "web-security",
+    "vulnerability-scanner",
     "xss",
     "sql-injection",
-    "penetration-testing"
+    "owasp",
+    "security-automation",
+    "web-application-security",
+    "payload-injection",
+    "browser-testing",
+    "security-framework",
+    "appsec",
+    "dynamic-analysis"
   ],
   "author": "rawlab",
   "license": "AGPL-3.0",
@@ -58,7 +65,7 @@
     "type": "git",
     "url": "git+https://github.com/vulcnize/vulcn.git"
   },
-  "homepage": "https://vulcn.dev",
+  "homepage": "https://docs.vulcn.dev",
   "bugs": {
     "url": "https://github.com/vulcnize/vulcn/issues"
   },

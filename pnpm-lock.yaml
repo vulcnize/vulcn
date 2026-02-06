@@ -45,6 +45,9 @@ importers:
 
   cli:
     dependencies:
+      '@vulcn/driver-browser':
+        specifier: workspace:*
+        version: link:../drivers/browser
       '@vulcn/engine':
         specifier: workspace:*
         version: link:..
@@ -54,6 +57,9 @@ importers:
       '@vulcn/plugin-payloads':
         specifier: workspace:*
         version: link:../plugins/payloads
+      '@vulcn/plugin-report':
+        specifier: workspace:*
+        version: link:../plugins/report
       chalk:
         specifier: ^5.4.0
         version: 5.6.2
@@ -144,6 +150,28 @@ importers:
         version: 5.9.3
 
   plugins/payloads:
+    dependencies:
+      yaml:
+        specifier: ^2.4.0
+        version: 2.8.2
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.8
+      '@vulcn/engine':
+        specifier: workspace:*
+        version: link:../..
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(postcss@8.5.6)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  plugins/report:
     dependencies:
       yaml:
         specifier: ^2.4.0

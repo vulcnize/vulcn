@@ -19,7 +19,7 @@
  */
 
 // ============================================================================
-// Driver System (NEW in v0.3.0)
+// Driver System
 // ============================================================================
 
 export { DriverManager, driverManager } from "./driver-manager";
@@ -53,6 +53,7 @@ export type {
   PluginHooks,
   PluginContext,
   RecordContext,
+  RunContext as PluginRunContext,
   DetectContext,
   LoadedPlugin as LoadedPluginInfo,
   PluginLogger,
@@ -76,40 +77,4 @@ export type {
 // Core Types
 // ============================================================================
 
-export type {
-  BrowserType,
-  RecorderOptions,
-  RunnerOptions,
-  Finding,
-} from "./types";
-
-// ============================================================================
-// Legacy Exports (Deprecated - will be removed in v1.0)
-// These are browser-specific and should be imported from @vulcn/driver-browser
-// ============================================================================
-
-/** @deprecated Import from @vulcn/driver-browser instead */
-export { Recorder, type RecordingSession } from "./recorder";
-
-/** @deprecated Import from @vulcn/driver-browser instead */
-export { Runner } from "./runner";
-
-/** @deprecated Import from @vulcn/driver-browser instead */
-export {
-  createSession,
-  parseSession,
-  serializeSession,
-  SessionSchema,
-  StepSchema,
-} from "./session";
-export type { Session as LegacySession, Step as LegacyStep } from "./session";
-
-/** @deprecated Import from @vulcn/driver-browser instead */
-export {
-  launchBrowser,
-  installBrowsers,
-  checkBrowsers,
-  BrowserNotFoundError,
-  type LaunchOptions,
-  type BrowserLaunchResult,
-} from "./browser";
+export type { Finding } from "./types";

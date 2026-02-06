@@ -18,7 +18,7 @@ import type {
   DetectContext,
   Finding,
 } from "@vulcn/engine";
-import type { Dialog, ConsoleMessage } from "playwright";
+import type { Dialog, ConsoleMessage, Page } from "playwright";
 
 /**
  * Plugin configuration schema
@@ -107,9 +107,11 @@ const plugin: VulcnPlugin = {
      * This is the classic XSS proof - if alert() fires, JS executed
      */
     onDialog: async (
-      dialog: Dialog,
+      rawDialog: unknown,
       ctx: DetectContext,
     ): Promise<Finding | null> => {
+      const dialog = rawDialog as Dialog;
+      const page = ctx.page as Page;
       const config = configSchema.parse(ctx.config);
 
       if (!config.detectDialogs) {
@@ -142,7 +144,7 @@ const plugin: VulcnPlugin = {
         description: `JavaScript ${dialogType}() dialog was triggered, proving XSS execution. Message: "${message}"`,
         stepId: ctx.stepId,
         payload: ctx.payloadValue,
-        url: ctx.page.url(),
+        url: page.url(),
         evidence: `Dialog type: ${dialogType}, Message: ${message}`,
         metadata: {
           detectionMethod: "dialog",
@@ -158,9 +160,11 @@ const plugin: VulcnPlugin = {
      * Payloads can use console.log('VULCN_XSS:identifier') for detection
      */
     onConsoleMessage: async (
-      msg: ConsoleMessage,
+      rawMsg: unknown,
       ctx: DetectContext,
     ): Promise<Finding | null> => {
+      const msg = rawMsg as ConsoleMessage;
+      const page = ctx.page as Page;
       const config = configSchema.parse(ctx.config);
 
       if (!config.detectConsole) {
@@ -185,7 +189,7 @@ const plugin: VulcnPlugin = {
         description: `JavaScript console.log() with XSS marker was executed, proving code injection. Marker: "${text}"`,
         stepId: ctx.stepId,
         payload: ctx.payloadValue,
-        url: ctx.page.url(),
+        url: page.url(),
         evidence: `Console message: ${text}`,
         metadata: {
           detectionMethod: "console",
@@ -210,7 +214,8 @@ const plugin: VulcnPlugin = {
 
       // Check for dynamically created script elements
       try {
-        const scriptCount = await ctx.page.evaluate(() => {
+        const page = ctx.page as Page;
+        const scriptCount = await page.evaluate(() => {
           // Count script elements that were added after initial load
           const scripts = document.querySelectorAll("script");
           let dynamicScripts = 0;
@@ -245,7 +250,7 @@ const plugin: VulcnPlugin = {
             description: `Found ${scriptCount} script element(s) with suspicious content that may indicate DOM-based XSS`,
             stepId: ctx.stepId,
             payload: ctx.payloadValue,
-            url: ctx.page.url(),
+            url: page.url(),
             evidence: `${scriptCount} suspicious script elements`,
             metadata: {
               detectionMethod: "dom-mutation",

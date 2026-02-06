@@ -1,7 +1,7 @@
 {
   "name": "vulcn",
   "version": "0.3.0",
-  "description": "Security testing CLI - Record once, test with payloads, find vulnerabilities",
+  "description": "Modern, fast penetration testing CLI — record browser interactions once, replay with security payloads, and find vulnerabilities like XSS and SQLi automatically. A lightweight, pluggable alternative to legacy security scanners.",
   "type": "module",
   "bin": {
     "vulcn": "./vulcn.mjs"
@@ -25,19 +25,34 @@
   },
   "keywords": [
     "vulcn",
-    "security",
-    "testing",
-    "cli",
-    "recorder",
-    "xss",
-    "sql-injection",
+    "security-testing",
     "penetration-testing",
     "pentest",
-    "vulnerability",
-    "scanner",
+    "dast",
+    "web-security",
+    "vulnerability-scanner",
+    "security-scanner",
+    "xss",
+    "xss-detection",
+    "sql-injection",
+    "sqli",
+    "owasp",
+    "owasp-top-10",
+    "web-application-security",
+    "appsec",
+    "application-security",
+    "security-automation",
+    "browser-automation",
     "playwright",
-    "browser",
-    "automation"
+    "security-cli",
+    "pentest-tool",
+    "pentest-framework",
+    "vulnerability-detection",
+    "dynamic-analysis",
+    "payload-testing",
+    "security-audit",
+    "web-scanner",
+    "bug-bounty"
   ],
   "author": "rawlab",
   "license": "AGPL-3.0",
@@ -46,7 +61,7 @@
     "url": "git+https://github.com/vulcnize/vulcn.git",
     "directory": "cli"
   },
-  "homepage": "https://rawlab.dev/vulcn",
+  "homepage": "https://docs.vulcn.dev",
   "bugs": {
     "url": "https://github.com/vulcnize/vulcn/issues"
   },
@@ -63,8 +78,10 @@
   },
   "dependencies": {
     "@vulcn/engine": "workspace:*",
+    "@vulcn/driver-browser": "workspace:*",
     "@vulcn/plugin-payloads": "workspace:*",
     "@vulcn/plugin-detect-xss": "workspace:*",
+    "@vulcn/plugin-report": "workspace:*",
     "commander": "^13.1.0",
     "chalk": "^5.4.0",
     "ora": "^8.2.0",

@@ -1,7 +1,7 @@
 {
   "name": "@vulcn/plugin-detect-reflection",
   "version": "0.2.0",
-  "description": "Pattern-based reflection detection plugin for Vulcn - detects payloads appearing in responses",
+  "description": "Input reflection detection plugin for Vulcn — identifies when attack payloads appear unescaped in HTTP responses, catching output encoding failures and potential injection points.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -33,10 +33,17 @@
     "vulcn",
     "plugin",
     "reflection",
+    "reflection-detection",
+    "input-validation",
+    "output-encoding",
     "xss",
-    "detection",
-    "security",
-    "testing"
+    "injection-detection",
+    "vulnerability-detection",
+    "security-testing",
+    "penetration-testing",
+    "web-security",
+    "owasp",
+    "dast"
   ],
   "author": "rawlab",
   "license": "AGPL-3.0",
@@ -44,6 +51,10 @@
     "type": "git",
     "url": "git+https://github.com/vulcnize/vulcn.git",
     "directory": "plugins/detect-reflection"
+  },
+  "homepage": "https://docs.vulcn.dev",
+  "bugs": {
+    "url": "https://github.com/vulcnize/vulcn/issues"
   },
   "peerDependencies": {
     "@vulcn/engine": ">=0.3.0"

@@ -49,6 +49,8 @@ program
   .option("-b, --browser <browser>", "Browser to use", "chromium")
   .option("--headless", "Run in headless mode", true)
   .option("--no-headless", "Run with visible browser")
+  .option("-r, --report <format>", "Generate report (html, json, yaml, all)")
+  .option("--report-output <dir>", "Output directory for reports", ".")
   .action(runCommand);
 
 // vulcn payloads

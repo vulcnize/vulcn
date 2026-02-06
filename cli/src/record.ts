@@ -1,7 +1,9 @@
 import { writeFile } from "node:fs/promises";
-import { Recorder, serializeSession, type BrowserType } from "@vulcn/engine";
+import { DriverManager } from "@vulcn/engine";
+import browserDriver from "@vulcn/driver-browser";
 import chalk from "chalk";
 import ora from "ora";
+import { stringify } from "yaml";
 
 interface RecordOptions {
   output: string;
@@ -12,9 +14,14 @@ interface RecordOptions {
 export async function recordCommand(url: string, options: RecordOptions) {
   const spinner = ora("Starting browser...").start();
 
+  // Set up driver manager with browser driver
+  const drivers = new DriverManager();
+  drivers.register(browserDriver);
+
   try {
-    const session = await Recorder.start(url, {
-      browser: options.browser as BrowserType,
+    const handle = await drivers.startRecording("browser", {
+      startUrl: url,
+      browser: options.browser,
       headless: options.headless,
     });
 
@@ -47,13 +54,13 @@ export async function recordCommand(url: string, options: RecordOptions) {
       const saveSpinner = ora("Stopping recording...").start();
 
       try {
-        const result = await session.stop();
-        const yaml = serializeSession(result);
+        const session = await handle.stop();
+        const yaml = stringify(session);
         await writeFile(options.output, yaml, "utf-8");
 
         saveSpinner.succeed(`Session saved to ${chalk.green(options.output)}`);
         console.log();
-        console.log(chalk.cyan(`📝 Recorded ${result.steps.length} steps`));
+        console.log(chalk.cyan(`📝 Recorded ${session.steps.length} steps`));
         console.log();
         console.log(chalk.gray("To run with payloads:"));
         console.log(
