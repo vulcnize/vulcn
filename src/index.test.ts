@@ -4,8 +4,8 @@ import {
   Runner,
   parseSession,
   createSession,
-  BUILTIN_PAYLOADS,
-  type Payload,
+  PluginManager,
+  PLUGIN_API_VERSION,
 } from "../src/index.js";
 
 describe("Public API exports", () => {
@@ -24,18 +24,22 @@ describe("Public API exports", () => {
     expect(typeof parseSession).toBe("function");
   });
 
-  it("should export BUILTIN_PAYLOADS", () => {
-    expect(BUILTIN_PAYLOADS).toBeDefined();
-    expect(typeof BUILTIN_PAYLOADS).toBe("object");
-  });
-
   it("should export createSession function", () => {
     expect(createSession).toBeDefined();
     expect(typeof createSession).toBe("function");
   });
+
+  it("should export PluginManager class", () => {
+    expect(PluginManager).toBeDefined();
+    expect(typeof PluginManager).toBe("function");
+  });
+
+  it("should export PLUGIN_API_VERSION", () => {
+    expect(PLUGIN_API_VERSION).toBe(1);
+  });
 });
 
-describe("Types", () => {
+describe("Session API", () => {
   it("should allow creating Session objects", () => {
     const session = createSession({
       name: "test-session",
@@ -45,13 +49,18 @@ describe("Types", () => {
     expect(session.name).toBe("test-session");
     expect(session.steps).toEqual([]);
   });
+});
 
-  it("should allow referencing Payload type", () => {
-    // Verify the Payload type structure by accessing a known payload
-    const payload: Payload = BUILTIN_PAYLOADS["xss-basic"];
-    expect(payload.name).toBe("xss-basic");
-    expect(payload.category).toBe("xss");
-    expect(Array.isArray(payload.payloads)).toBe(true);
-    expect(Array.isArray(payload.detectPatterns)).toBe(true);
+describe("Plugin API", () => {
+  it("should allow creating and managing plugins", async () => {
+    const manager = new PluginManager();
+
+    manager.addPlugin({
+      name: "test-plugin",
+      version: "1.0.0",
+    });
+
+    expect(manager.getPlugins()).toHaveLength(1);
+    await manager.destroy();
   });
 });

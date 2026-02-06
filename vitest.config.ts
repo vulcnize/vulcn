@@ -13,14 +13,25 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "lcov"],
       thresholds: {
-        // Start with realistic thresholds for v0.1, increase as we add tests
-        lines: 30,
-        functions: 20,
-        branches: 50,
-        statements: 30,
+        // 60% coverage required for stability
+        lines: 60,
+        functions: 60,
+        branches: 60,
+        statements: 60,
       },
       include: ["src/**/*.ts"],
-      exclude: ["src/**/*.test.ts", "**/dist/**", "src/tsup.config.ts"],
+      exclude: [
+        "src/**/*.test.ts",
+        "**/dist/**",
+        "src/tsup.config.ts",
+        // Browser-dependent modules require real browser for testing
+        // These are tested via integration tests
+        "src/browser.ts",
+        "src/recorder.ts",
+        "src/runner.ts",
+        // Type-only files
+        "src/types.ts",
+      ],
     },
   },
 });

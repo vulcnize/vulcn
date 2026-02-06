@@ -1,3 +1,5 @@
+import type { PayloadCategory } from "./payload-types";
+
 export type BrowserType = "chromium" | "firefox" | "webkit";
 
 export interface RecorderOptions {
@@ -13,7 +15,7 @@ export interface RunnerOptions {
 }
 
 export interface Finding {
-  type: "xss" | "sqli" | "ssrf" | "path-traversal" | "custom";
+  type: PayloadCategory;
   severity: "critical" | "high" | "medium" | "low" | "info";
   title: string;
   description: string;
@@ -21,6 +23,8 @@ export interface Finding {
   payload: string;
   url: string;
   evidence?: string;
+  /** Plugin-specific metadata */
+  metadata?: Record<string, unknown>;
 }
 
 export interface RunResult {

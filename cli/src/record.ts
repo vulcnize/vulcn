@@ -4,17 +4,16 @@ import chalk from "chalk";
 import ora from "ora";
 
 interface RecordOptions {
-  url: string;
   output: string;
   browser: string;
   headless: boolean;
 }
 
-export async function recordCommand(options: RecordOptions) {
+export async function recordCommand(url: string, options: RecordOptions) {
   const spinner = ora("Starting browser...").start();
 
   try {
-    const session = await Recorder.start(options.url, {
+    const session = await Recorder.start(url, {
       browser: options.browser as BrowserType,
       headless: options.headless,
     });
@@ -22,7 +21,7 @@ export async function recordCommand(options: RecordOptions) {
     spinner.succeed("Browser started");
     console.log();
     console.log(chalk.cyan("🎬 Recording started"));
-    console.log(chalk.gray(`   URL: ${options.url}`));
+    console.log(chalk.gray(`   URL: ${url}`));
     console.log(chalk.gray(`   Browser: ${options.browser}`));
     console.log();
     console.log(

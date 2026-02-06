@@ -1,0 +1,37 @@
+# Vulcn Configuration
+# See https://rawlab.dev/vulcn for documentation
+
+version: "1"
+
+# Plugin configuration
+plugins:
+  # Official payloads plugin
+  - name: "@vulcn/plugin-payloads"
+    config:
+      # Include built-in payloads (default: true)
+      builtin: true
+
+      # Specific payloads to include (optional, defaults to all)
+      # include:
+      #   - xss-basic
+      #   - sqli-basic
+
+      # Payloads to exclude (optional)
+      # exclude:
+      #   - xss-polyglot
+
+      # Fetch from PayloadsAllTheThings (optional)
+      # payloadbox:
+      #   - xss
+      #   - sql-injection
+
+      # Custom payload files (optional)
+      # files:
+      #   - ./my-payloads.yml
+      #   - ./custom-xss.json
+
+# Global settings
+settings:
+  browser: chromium
+  headless: true
+  # timeout: 5000
