@@ -2,3 +2,4 @@ packages:
   - .
   - cli
   - plugins/*
+  - drivers/*

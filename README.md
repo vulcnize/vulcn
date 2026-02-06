@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/vulcnize/vulcn/actions/workflows/ci.yml/badge.svg)](https://github.com/vulcnize/vulcn/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/vulcn.svg)](https://www.npmjs.com/package/vulcn)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
 ---
 
@@ -14,11 +14,11 @@
 # Install globally
 npm install -g vulcn
 
-# Record a session
-vulcn record --url https://example.com/login
+# Record a session (opens browser)
+vulcn record https://example.com/login
 
-# Run with XSS payloads
-vulcn run session.vulcn.yml --payload xss-basic
+# Run with security payloads
+vulcn run session.vulcn.yml
 ```
 
 **Zero-config browser support** — Vulcn uses your existing Chrome or Edge. No browser downloads needed.
@@ -27,198 +27,64 @@ vulcn run session.vulcn.yml --payload xss-basic
 
 ## 🎯 What is Vulcn?
 
-Vulcn is a security testing tool that:
+Vulcn is a **driver-based security testing framework** that:
 
-1. **Records** your browser interactions (clicks, form inputs, navigation)
-2. **Replays** them with security payloads injected into input fields
-3. **Detects** vulnerabilities like XSS and SQL injection
+1. **Records** interactions (browser clicks, API requests, CLI commands)
+2. **Replays** them with security payloads injected
+3. **Detects** vulnerabilities via plugins (XSS, SQLi, reflection, etc.)
 
-Think of it as **Playwright + Burp Suite**, but simpler and focused on automated payload testing.
+### Architecture
 
----
-
-## 🚀 Features
-
-| Feature               | Description                                         |
-| --------------------- | --------------------------------------------------- |
-| 🎬 **Record**         | Capture browser sessions as replayable YAML files   |
-| 🔍 **Test**           | Inject XSS, SQLi, and custom payloads automatically |
-| 🌐 **Cross-platform** | Works on macOS, Linux, and Windows                  |
-| 🚫 **Zero-config**    | Uses system Chrome/Edge by default                  |
-| 📊 **CI/CD Ready**    | Exit codes for pipeline integration                 |
-| 🔧 **Extensible**     | Add custom payloads and detection patterns          |
-
----
-
-## 📦 Installation
-
-### CLI
-
-```bash
-npm install -g vulcn
 ```
-
-### Programmatic API
-
-```bash
-npm install @vulcn/engine
-```
-
-```typescript
-import { Recorder, Runner, parseSession } from "@vulcn/engine";
-
-// Record programmatically
-const session = await Recorder.start("https://example.com");
-// ... user interacts ...
-const recorded = await session.stop();
-
-// Run with payloads
-const result = await Runner.execute(recorded, ["xss-basic"]);
-console.log(result.findings);
+┌─────────────────────────────────────────────────────────┐
+│                     vulcn CLI                           │
+├─────────────────────────────────────────────────────────┤
+│                   @vulcn/engine                         │
+│  ┌─────────────────────┐  ┌──────────────────────────┐  │
+│  │   DriverManager     │  │    PluginManager         │  │
+│  │   • browser         │  │    • payloads            │  │
+│  │   • api (soon)      │  │    • detect-xss          │  │
+│  │   • cli (soon)      │  │    • detect-reflection   │  │
+│  └─────────────────────┘  └──────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🎬 Recording
+## 📦 Packages
 
-Start recording a session:
-
-```bash
-vulcn record --url https://target.com/login
-```
-
-Options:
-
-- `--url, -u` — Start URL (required)
-- `--output, -o` — Output file (default: `session.vulcn.yml`)
-- `--browser, -b` — Browser (`chromium`, `firefox`, `webkit`)
-- `--headless` — Run headless
-
-When recording:
-
-1. Browser opens to your start URL
-2. Interact normally (fill forms, click buttons)
-3. Press `Ctrl+C` to stop and save
-
----
-
-## 🔍 Running Tests
-
-Run a recorded session with payloads:
-
-```bash
-vulcn run session.vulcn.yml --payload xss-basic --payload sqli-basic
-```
-
-Options:
-
-- `--payload, -p` — Payload to use (can specify multiple)
-- `--headless` — Run headless (default: true)
-- `--browser, -b` — Browser to use
-
-### Built-in Payloads
-
-| Payload      | Category | Description                    |
-| ------------ | -------- | ------------------------------ |
-| `xss-basic`  | XSS      | Script tags and event handlers |
-| `xss-event`  | XSS      | Event handler injection        |
-| `xss-svg`    | XSS      | SVG-based XSS                  |
-| `sqli-basic` | SQLi     | Basic SQL injection            |
-| `sqli-error` | SQLi     | Error-based SQLi detection     |
-| `sqli-blind` | SQLi     | Blind SQLi payloads            |
-
-List all payloads:
-
-```bash
-vulcn payloads
-```
-
----
-
-## 📄 Session Format
-
-Sessions are stored as YAML:
-
-```yaml
-version: "1"
-name: Login Test
-recordedAt: "2026-02-05T12:00:00Z"
-browser: chromium
-viewport:
-  width: 1280
-  height: 720
-startUrl: https://example.com/login
-steps:
-  - id: step_001
-    type: navigate
-    url: https://example.com/login
-    timestamp: 0
-  - id: step_002
-    type: input
-    selector: input[name="username"]
-    value: testuser
-    injectable: true
-    timestamp: 1500
-  - id: step_003
-    type: click
-    selector: button[type="submit"]
-    timestamp: 3000
-```
-
----
-
-## 🩺 Browser Management
-
-Check available browsers:
-
-```bash
-vulcn doctor
-```
-
-Install Playwright browsers (if needed):
-
-```bash
-vulcn install chromium
-vulcn install --all  # Install all browsers
-```
-
----
-
-## 🔧 CI/CD Integration
-
-Vulcn returns exit code `1` when vulnerabilities are found:
-
-```yaml
-# GitHub Actions example
-- name: Security Test
-  run: |
-    npm install -g vulcn
-    vulcn run tests/login.vulcn.yml --payload xss-basic --headless
-```
+| Package                                                                                            | Description                              |
+| -------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| [`vulcn`](https://www.npmjs.com/package/vulcn)                                                     | CLI tool                                 |
+| [`@vulcn/engine`](https://www.npmjs.com/package/@vulcn/engine)                                     | Core engine with driver & plugin systems |
+| [`@vulcn/driver-browser`](https://www.npmjs.com/package/@vulcn/driver-browser)                     | Browser recording with Playwright        |
+| [`@vulcn/plugin-payloads`](https://www.npmjs.com/package/@vulcn/plugin-payloads)                   | XSS, SQLi, SSRF payloads                 |
+| [`@vulcn/plugin-detect-xss`](https://www.npmjs.com/package/@vulcn/plugin-detect-xss)               | Execution-based XSS detection            |
+| [`@vulcn/plugin-detect-reflection`](https://www.npmjs.com/package/@vulcn/plugin-detect-reflection) | Pattern-based reflection detection       |
 
 ---
 
 ## 📚 Documentation
 
-- [Contributing Guide](./CONTRIBUTING.md)
-- [Security Policy](./SECURITY.md)
+**Full documentation is available at [docs.vulcn.dev](https://docs.vulcn.dev)**
+
+- [Quickstart Guide](https://docs.vulcn.dev/quickstart)
+- [CLI Reference](https://docs.vulcn.dev/cli/overview)
+- [Driver System](https://docs.vulcn.dev/drivers/overview)
+- [Plugin System](https://docs.vulcn.dev/plugins/overview)
+- [API Reference](https://docs.vulcn.dev/api/overview)
 
 ---
 
-## 🛣️ Roadmap
+## 🤝 Contributing
 
-- [ ] HTML/JSON reports
-- [ ] Custom payload definitions
-- [ ] SSRF and path traversal payloads
-- [ ] Authenticated session support
-- [ ] API endpoint testing
-- [ ] Vulnerability severity scoring
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and guidelines.
 
 ---
 
 ## 📝 License
 
-[MIT](./LICENSE) © [rawlab](https://rawlab.dev)
+[AGPL-3.0](./LICENSE) © [rawlab](https://rawlab.dev)
 
 ---
 
