@@ -1,0 +1,53 @@
+{
+  "name": "@vulcn/plugin-payloads",
+  "version": "0.0.0",
+  "description": "Official payload loader plugin for Vulcn - built-in, PayloadBox, and custom file loading",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "vulcn",
+    "plugin",
+    "payloads",
+    "xss",
+    "sqli",
+    "security"
+  ],
+  "author": "rawlab",
+  "license": "AGPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vulcnize/vulcn.git",
+    "directory": "plugins/payloads"
+  },
+  "peerDependencies": {
+    "@vulcn/engine": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@vulcn/engine": "workspace:*",
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "yaml": "^2.4.0",
+    "zod": "^3.24.0"
+  }
+}

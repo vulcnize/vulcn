@@ -1,0 +1,286 @@
+/**
+ * Vulcn Plugin System Types
+ * @module @vulcn/engine/plugin
+ */
+
+import type {
+  Page,
+  Dialog,
+  ConsoleMessage,
+  Request,
+  Response,
+} from "playwright";
+import type { z } from "zod";
+import type { Session, Step } from "./session";
+import type { Finding, RunResult, BrowserType } from "./types";
+import type { RuntimePayload, PayloadCategory } from "./payload-types";
+
+// Re-export for plugin authors
+export type {
+  Session,
+  Step,
+  Finding,
+  RunResult,
+  RuntimePayload,
+  PayloadCategory,
+};
+
+/**
+ * Plugin API version - plugins declare compatibility
+ */
+export const PLUGIN_API_VERSION = 1;
+
+/**
+ * Plugin source types for identification
+ */
+export type PluginSource = "builtin" | "npm" | "local" | "custom";
+
+/**
+ * Main plugin interface
+ */
+export interface VulcnPlugin {
+  /** Unique plugin name (e.g., "@vulcn/plugin-payloads") */
+  name: string;
+
+  /** Plugin version (semver) */
+  version: string;
+
+  /** Plugin API version this plugin targets */
+  apiVersion?: number;
+
+  /** Human-readable description */
+  description?: string;
+
+  /** Lifecycle hooks */
+  hooks?: PluginHooks;
+
+  /**
+   * Payloads provided by this plugin (Loaders)
+   * Can be static array or async function for lazy loading
+   */
+  payloads?: RuntimePayload[] | (() => Promise<RuntimePayload[]>);
+
+  /**
+   * Zod schema for plugin configuration validation
+   */
+  configSchema?: z.ZodSchema;
+}
+
+/**
+ * Plugin lifecycle hooks
+ */
+export interface PluginHooks {
+  // ─────────────────────────────────────────────────────────────────
+  // Initialization
+  // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Called when plugin is loaded, before any operation
+   * Use for setup, loading payloads, etc.
+   */
+  onInit?: (ctx: PluginContext) => Promise<void>;
+
+  /**
+   * Called when plugin is unloaded/cleanup
+   */
+  onDestroy?: (ctx: PluginContext) => Promise<void>;
+
+  // ─────────────────────────────────────────────────────────────────
+  // Recording Phase
+  // ─────────────────────────────────────────────────────────────────
+
+  /** Called when recording starts */
+  onRecordStart?: (ctx: RecordContext) => Promise<void>;
+
+  /** Called for each recorded step, can transform */
+  onRecordStep?: (step: Step, ctx: RecordContext) => Promise<Step>;
+
+  /** Called when recording ends, can transform session */
+  onRecordEnd?: (session: Session, ctx: RecordContext) => Promise<Session>;
+
+  // ─────────────────────────────────────────────────────────────────
+  // Running Phase
+  // ─────────────────────────────────────────────────────────────────
+
+  /** Called when run starts */
+  onRunStart?: (ctx: RunContext) => Promise<void>;
+
+  /** Called before each payload is injected, can transform payload */
+  onBeforePayload?: (
+    payload: string,
+    step: Step,
+    ctx: RunContext,
+  ) => Promise<string>;
+
+  /** Called after payload injection, for detection */
+  onAfterPayload?: (ctx: DetectContext) => Promise<Finding[]>;
+
+  /** Called when run ends, can transform results */
+  onRunEnd?: (result: RunResult, ctx: RunContext) => Promise<RunResult>;
+
+  // ─────────────────────────────────────────────────────────────────
+  // Browser Event Hooks (Detection)
+  // ─────────────────────────────────────────────────────────────────
+
+  /** Called on page load/navigation */
+  onPageLoad?: (page: Page, ctx: DetectContext) => Promise<Finding[]>;
+
+  /** Called when JavaScript alert/confirm/prompt appears */
+  onDialog?: (dialog: Dialog, ctx: DetectContext) => Promise<Finding | null>;
+
+  /** Called on console.log/warn/error */
+  onConsoleMessage?: (
+    msg: ConsoleMessage,
+    ctx: DetectContext,
+  ) => Promise<Finding | null>;
+
+  /** Called on network request */
+  onNetworkRequest?: (
+    request: Request,
+    ctx: DetectContext,
+  ) => Promise<Finding | null>;
+
+  /** Called on network response */
+  onNetworkResponse?: (
+    response: Response,
+    ctx: DetectContext,
+  ) => Promise<Finding | null>;
+}
+
+/**
+ * Logger interface for plugins
+ */
+export interface PluginLogger {
+  debug: (msg: string, ...args: unknown[]) => void;
+  info: (msg: string, ...args: unknown[]) => void;
+  warn: (msg: string, ...args: unknown[]) => void;
+  error: (msg: string, ...args: unknown[]) => void;
+}
+
+/**
+ * Engine information exposed to plugins
+ */
+export interface EngineInfo {
+  version: string;
+  pluginApiVersion: number;
+}
+
+/**
+ * Base context available to all plugin hooks
+ */
+export interface PluginContext {
+  /** Plugin-specific config from vulcn.config.yml */
+  config: Record<string, unknown>;
+
+  /** Engine information */
+  engine: EngineInfo;
+
+  /** Shared payload registry - loaders add payloads here */
+  payloads: RuntimePayload[];
+
+  /** Shared findings collection - detectors add findings here */
+  findings: Finding[];
+
+  /** Scoped logger */
+  logger: PluginLogger;
+
+  /** Fetch API for network requests */
+  fetch: typeof fetch;
+}
+
+/**
+ * Context for recording phase hooks
+ */
+export interface RecordContext extends PluginContext {
+  /** Starting URL */
+  startUrl: string;
+
+  /** Browser type being used */
+  browser: BrowserType;
+
+  /** Playwright page instance */
+  page: Page;
+}
+
+/**
+ * Context for running phase hooks
+ */
+export interface RunContext extends PluginContext {
+  /** Session being executed */
+  session: Session;
+
+  /** Playwright page instance */
+  page: Page;
+
+  /** Browser type being used */
+  browser: BrowserType;
+
+  /** Whether running headless */
+  headless: boolean;
+}
+
+/**
+ * Context for detection hooks
+ */
+export interface DetectContext extends RunContext {
+  /** Current step being tested */
+  step: Step;
+
+  /** Current payload set being tested */
+  payloadSet: RuntimePayload;
+
+  /** Actual payload value injected */
+  payloadValue: string;
+
+  /** Step ID for reporting */
+  stepId: string;
+}
+
+/**
+ * Plugin configuration in vulcn.config.yml
+ */
+export interface PluginConfig {
+  /** Plugin name/path */
+  name: string;
+
+  /** Plugin-specific configuration */
+  config?: Record<string, unknown>;
+
+  /** Whether plugin is enabled (default: true) */
+  enabled?: boolean;
+}
+
+/**
+ * Vulcn configuration file schema
+ */
+export interface VulcnConfig {
+  /** Config version */
+  version: string;
+
+  /** Plugins to load */
+  plugins?: PluginConfig[];
+
+  /** Global settings */
+  settings?: {
+    browser?: BrowserType;
+    headless?: boolean;
+    timeout?: number;
+  };
+}
+
+/**
+ * Loaded plugin instance with resolved config
+ */
+export interface LoadedPlugin {
+  /** Plugin definition */
+  plugin: VulcnPlugin;
+
+  /** Resolved configuration */
+  config: Record<string, unknown>;
+
+  /** Source of the plugin */
+  source: PluginSource;
+
+  /** Whether plugin is enabled */
+  enabled: boolean;
+}

@@ -1,7 +1,22 @@
+/**
+ * Recorder - captures browser interactions as a replayable session
+ * v0.2.0: Plugin hooks for recording customization
+ */
+
 import { Page } from "playwright";
 import { createSession, type Session, type Step } from "./session";
 import { launchBrowser } from "./browser";
 import type { RecorderOptions } from "./types";
+import { PluginManager, pluginManager } from "./plugin-manager";
+import type { RecordContext } from "./plugin-types";
+
+/**
+ * Configuration for the recorder
+ */
+export interface RecorderConfig {
+  /** Plugin manager to use (defaults to shared instance) */
+  pluginManager?: PluginManager;
+}
 
 /**
  * Active recording session handle
@@ -17,6 +32,11 @@ export interface RecordingSession {
 
 /**
  * Recorder - captures browser interactions as a replayable session
+ *
+ * Uses plugin hooks for:
+ * - onRecordStart: Called when recording starts
+ * - onRecordStep: Called for each step, can transform
+ * - onRecordEnd: Called when recording ends, can transform session
  */
 export class Recorder {
   /**
@@ -26,10 +46,15 @@ export class Recorder {
   static async start(
     startUrl: string,
     options: RecorderOptions = {},
+    config: RecorderConfig = {},
   ): Promise<RecordingSession> {
+    const manager = config.pluginManager ?? pluginManager;
     const browserType = options.browser ?? "chromium";
     const viewport = options.viewport ?? { width: 1280, height: 720 };
     const headless = options.headless ?? false;
+
+    // Initialize plugins if not already done
+    await manager.initialize();
 
     // Launch browser with smart fallback (system Chrome first)
     const { browser } = await launchBrowser({
@@ -60,22 +85,74 @@ export class Recorder {
       return `step_${String(stepCounter).padStart(3, "0")}`;
     };
 
+    // Create base record context
+    const baseRecordContext: Omit<RecordContext, "config"> = {
+      startUrl,
+      browser: browserType,
+      page,
+      engine: { version: "0.2.0", pluginApiVersion: 1 },
+      payloads: manager.getPayloads(),
+      findings: manager.getFindings(),
+      logger: {
+        debug: console.debug.bind(console),
+        info: console.info.bind(console),
+        warn: console.warn.bind(console),
+        error: console.error.bind(console),
+      },
+      fetch: globalThis.fetch,
+    };
+
+    // Call onRecordStart hooks
+    await manager.callHook("onRecordStart", async (hook, ctx) => {
+      const recordCtx: RecordContext = { ...baseRecordContext, ...ctx };
+      await hook(recordCtx);
+    });
+
     // Add initial navigation step
-    steps.push({
+    const initialStep: Step = {
       id: generateStepId(),
       type: "navigate",
       url: startUrl,
       timestamp: 0,
-    });
+    };
 
-    // Attach event listeners
-    Recorder.attachListeners(page, steps, startTime, generateStepId);
+    // Transform through plugins
+    const transformedInitialStep = await Recorder.transformStep(
+      initialStep,
+      manager,
+      baseRecordContext,
+    );
+    if (transformedInitialStep) {
+      steps.push(transformedInitialStep);
+    }
+
+    // Attach event listeners with step transformation
+    Recorder.attachListeners(
+      page,
+      steps,
+      startTime,
+      generateStepId,
+      manager,
+      baseRecordContext,
+    );
 
     return {
       async stop() {
+        // Call onRecordEnd hooks to transform session
         session.steps = steps;
+        let finalSession = session;
+
+        for (const loaded of manager.getPlugins()) {
+          const hook = loaded.plugin.hooks?.onRecordEnd;
+          if (hook) {
+            const ctx = manager.createContext(loaded.config);
+            const recordCtx: RecordContext = { ...baseRecordContext, ...ctx };
+            finalSession = await hook(finalSession, recordCtx);
+          }
+        }
+
         await browser.close();
-        return session;
+        return finalSession;
       },
       getSteps() {
         return [...steps];
@@ -86,13 +163,50 @@ export class Recorder {
     };
   }
 
+  /**
+   * Transform a step through plugin hooks
+   * Returns null if the step should be filtered out
+   */
+  private static async transformStep(
+    step: Step,
+    manager: PluginManager,
+    baseContext: Omit<RecordContext, "config">,
+  ): Promise<Step | null> {
+    let transformedStep = step;
+
+    for (const loaded of manager.getPlugins()) {
+      const hook = loaded.plugin.hooks?.onRecordStep;
+      if (hook) {
+        const ctx = manager.createContext(loaded.config);
+        const recordCtx: RecordContext = { ...baseContext, ...ctx };
+        transformedStep = await hook(transformedStep, recordCtx);
+      }
+    }
+
+    return transformedStep;
+  }
+
   private static attachListeners(
     page: Page,
     steps: Step[],
     startTime: number,
     generateStepId: () => string,
+    manager: PluginManager,
+    baseContext: Omit<RecordContext, "config">,
   ) {
     const getTimestamp = () => Date.now() - startTime;
+
+    // Helper to add step with plugin transformation
+    const addStep = async (step: Step) => {
+      const transformed = await Recorder.transformStep(
+        step,
+        manager,
+        baseContext,
+      );
+      if (transformed) {
+        steps.push(transformed);
+      }
+    };
 
     // Track navigation
     page.on("framenavigated", (frame) => {
@@ -107,7 +221,7 @@ export class Recorder {
         ) {
           return;
         }
-        steps.push({
+        addStep({
           id: generateStepId(),
           type: "navigate",
           url,
@@ -119,7 +233,7 @@ export class Recorder {
     // Expose recording function to browser
     page.exposeFunction(
       "__vulcn_record",
-      (event: { type: string; data: Record<string, unknown> }) => {
+      async (event: { type: string; data: Record<string, unknown> }) => {
         const timestamp = getTimestamp();
 
         switch (event.type) {
@@ -129,7 +243,7 @@ export class Recorder {
               x: number;
               y: number;
             };
-            steps.push({
+            await addStep({
               id: generateStepId(),
               type: "click",
               selector: data.selector,
@@ -145,7 +259,7 @@ export class Recorder {
               inputType: string | null;
               injectable: boolean;
             };
-            steps.push({
+            await addStep({
               id: generateStepId(),
               type: "input",
               selector: data.selector,
@@ -157,7 +271,7 @@ export class Recorder {
           }
           case "keypress": {
             const data = event.data as { key: string; modifiers?: string[] };
-            steps.push({
+            await addStep({
               id: generateStepId(),
               type: "keypress",
               key: data.key,

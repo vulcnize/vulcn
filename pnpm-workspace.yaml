@@ -1,3 +1,4 @@
 packages:
   - "src"
   - "cli"
+  - "plugins/*"
