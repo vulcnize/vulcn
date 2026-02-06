@@ -1,7 +1,7 @@
 {
   "name": "@vulcn/plugin-payloads",
   "version": "0.2.0",
-  "description": "Official payload loader plugin for Vulcn - built-in, PayloadBox, and custom file loading",
+  "description": "Security payload loader plugin for Vulcn — curated XSS, SQLi, and injection attack payloads with built-in libraries, PayloadBox integration, and custom payload file support.",
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
@@ -33,10 +33,21 @@
   "keywords": [
     "vulcn",
     "plugin",
-    "payloads",
+    "security-payloads",
+    "attack-payloads",
+    "xss-payloads",
+    "sqli-payloads",
+    "injection-payloads",
     "xss",
     "sqli",
-    "security"
+    "sql-injection",
+    "penetration-testing",
+    "security-testing",
+    "payloadbox",
+    "wordlist",
+    "fuzzing",
+    "owasp",
+    "web-security"
   ],
   "author": "rawlab",
   "license": "AGPL-3.0",
@@ -44,6 +55,10 @@
     "type": "git",
     "url": "git+https://github.com/vulcnize/vulcn.git",
     "directory": "plugins/payloads"
+  },
+  "homepage": "https://docs.vulcn.dev",
+  "bugs": {
+    "url": "https://github.com/vulcnize/vulcn/issues"
   },
   "peerDependencies": {
     "@vulcn/engine": "^0.3.0"

@@ -1,18 +1,16 @@
 /**
  * Vulcn Plugin System Types
  * @module @vulcn/engine/plugin
+ *
+ * The plugin system is driver-agnostic. Detection plugins receive
+ * a generic page interface rather than Playwright types directly.
+ * This allows the same plugin to work across different driver types.
  */
 
-import type {
-  Page,
-  Dialog,
-  ConsoleMessage,
-  Request,
-  Response,
-} from "playwright";
 import type { z } from "zod";
-import type { Session, Step } from "./session";
-import type { Finding, RunResult, BrowserType } from "./types";
+import type { Session, Step } from "./driver-types";
+import type { Finding } from "./types";
+import type { RunResult } from "./driver-types";
 import type { RuntimePayload, PayloadCategory } from "./payload-types";
 
 // Re-export for plugin authors
@@ -68,6 +66,10 @@ export interface VulcnPlugin {
 
 /**
  * Plugin lifecycle hooks
+ *
+ * Detection hooks (onDialog, onConsoleMessage, etc.) receive
+ * Playwright types from the driver. Plugins that use these
+ * should declare playwright as a peer/dev dependency.
  */
 export interface PluginHooks {
   // ─────────────────────────────────────────────────────────────────
@@ -120,29 +122,30 @@ export interface PluginHooks {
 
   // ─────────────────────────────────────────────────────────────────
   // Browser Event Hooks (Detection)
+  // These receive driver-specific types (e.g. Playwright's Dialog)
   // ─────────────────────────────────────────────────────────────────
 
-  /** Called on page load/navigation */
-  onPageLoad?: (page: Page, ctx: DetectContext) => Promise<Finding[]>;
-
   /** Called when JavaScript alert/confirm/prompt appears */
-  onDialog?: (dialog: Dialog, ctx: DetectContext) => Promise<Finding | null>;
+  onDialog?: (dialog: unknown, ctx: DetectContext) => Promise<Finding | null>;
 
   /** Called on console.log/warn/error */
   onConsoleMessage?: (
-    msg: ConsoleMessage,
+    msg: unknown,
     ctx: DetectContext,
   ) => Promise<Finding | null>;
 
+  /** Called on page load/navigation */
+  onPageLoad?: (page: unknown, ctx: DetectContext) => Promise<Finding[]>;
+
   /** Called on network request */
   onNetworkRequest?: (
-    request: Request,
+    request: unknown,
     ctx: DetectContext,
   ) => Promise<Finding | null>;
 
   /** Called on network response */
   onNetworkResponse?: (
-    response: Response,
+    response: unknown,
     ctx: DetectContext,
   ) => Promise<Finding | null>;
 }
@@ -192,14 +195,8 @@ export interface PluginContext {
  * Context for recording phase hooks
  */
 export interface RecordContext extends PluginContext {
-  /** Starting URL */
-  startUrl: string;
-
-  /** Browser type being used */
-  browser: BrowserType;
-
-  /** Playwright page instance */
-  page: Page;
+  /** Page interface (driver-specific, e.g. Playwright Page) */
+  page: unknown;
 }
 
 /**
@@ -209,11 +206,8 @@ export interface RunContext extends PluginContext {
   /** Session being executed */
   session: Session;
 
-  /** Playwright page instance */
-  page: Page;
-
-  /** Browser type being used */
-  browser: BrowserType;
+  /** Page interface (driver-specific, e.g. Playwright Page) */
+  page: unknown;
 
   /** Whether running headless */
   headless: boolean;
@@ -262,7 +256,6 @@ export interface VulcnConfig {
 
   /** Global settings */
   settings?: {
-    browser?: BrowserType;
     headless?: boolean;
     timeout?: number;
   };

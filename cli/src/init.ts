@@ -60,7 +60,7 @@ export async function initCommand(options: InitOptions) {
 
     // Add helpful comments
     const content = `# Vulcn Configuration
-# Docs: https://rawlab.dev/vulcn/config
+# Docs: https://docs.vulcn.dev/config
 
 ${yamlContent}`;
 

@@ -60,7 +60,7 @@ async function saveConfigFile(
   const isJson = path.endsWith(".json");
   const content = isJson
     ? JSON.stringify(config, null, 2)
-    : `# Vulcn Configuration\n# Docs: https://rawlab.dev/vulcn/config\n\n${YAML.stringify(config, { indent: 2 })}`;
+    : `# Vulcn Configuration\n# Docs: https://docs.vulcn.dev/config\n\n${YAML.stringify(config, { indent: 2 })}`;
   await writeFile(path, content, "utf-8");
 }
 

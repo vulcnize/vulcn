@@ -1,11 +1,6 @@
-import { readFile, access } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import {
-  Runner,
-  parseSession,
-  PluginManager,
-  type BrowserType,
-} from "@vulcn/engine";
+import { readFile } from "node:fs/promises";
+import { DriverManager, PluginManager } from "@vulcn/engine";
+import browserDriver from "@vulcn/driver-browser";
 import chalk from "chalk";
 import ora from "ora";
 
@@ -15,6 +10,8 @@ interface RunOptions {
   browser: string;
   headless: boolean;
   config?: string;
+  report?: string;
+  reportOutput?: string;
 }
 
 export async function runCommand(sessionFile: string, options: RunOptions) {
@@ -27,6 +24,10 @@ export async function runCommand(sessionFile: string, options: RunOptions) {
   // Load plugins from config
   await manager.loadPlugins();
 
+  // Set up driver manager with browser driver
+  const drivers = new DriverManager();
+  drivers.register(browserDriver);
+
   // Load session
   const loadSpinner = ora("Loading session...").start();
 
@@ -38,9 +39,10 @@ export async function runCommand(sessionFile: string, options: RunOptions) {
     process.exit(1);
   }
 
+  // Parse session — supports both legacy and driver-based formats
   let session;
   try {
-    session = parseSession(sessionYaml);
+    session = drivers.parseSession(sessionYaml, "browser");
     loadSpinner.succeed(`Loaded session: ${chalk.cyan(session.name)}`);
   } catch (err) {
     loadSpinner.fail("Invalid session file");
@@ -48,11 +50,10 @@ export async function runCommand(sessionFile: string, options: RunOptions) {
     process.exit(1);
   }
 
-  // Add payloads from CLI options (legacy support)
+  // Add payloads from CLI options
   if (options.payloadFile) {
     const customSpinner = ora("Loading custom payloads...").start();
     try {
-      // Dynamically import the payloads plugin file loader
       const { loadFromFile } = await import("@vulcn/plugin-payloads");
       const loaded = await loadFromFile(options.payloadFile);
       manager.addPayloads(loaded);
@@ -120,6 +121,30 @@ export async function runCommand(sessionFile: string, options: RunOptions) {
     }
   }
 
+  // Load report plugin if --report is specified
+  if (options.report) {
+    const reportSpinner = ora("Loading report plugin...").start();
+    try {
+      const reportPlugin = await import("@vulcn/plugin-report");
+
+      // Determine output path from --report-output or default
+      const outputDir = options.reportOutput || ".";
+
+      manager.addPlugin(reportPlugin.default, {
+        format: options.report,
+        outputDir,
+        filename: "vulcn-report",
+        open: options.report === "html" || options.report === "all",
+      });
+      reportSpinner.succeed(
+        `Report plugin loaded (format: ${chalk.cyan(options.report)})`,
+      );
+    } catch (err) {
+      reportSpinner.fail(`Failed to load report plugin: ${err}`);
+      // Non-fatal: continue without report
+    }
+  }
+
   const payloads = manager.getPayloads();
 
   console.log();
@@ -140,25 +165,20 @@ export async function runCommand(sessionFile: string, options: RunOptions) {
   const runSpinner = ora("Executing tests...").start();
 
   try {
-    const result = await Runner.execute(
-      session,
-      {
-        browser: options.browser as BrowserType,
-        headless: options.headless,
-        onFinding: (finding) => {
-          runSpinner.stop();
-          console.log(chalk.red(`⚠️  FINDING: ${finding.title}`));
-          console.log(chalk.gray(`   Step: ${finding.stepId}`));
-          console.log(
-            chalk.gray(`   Payload: ${finding.payload.slice(0, 50)}...`),
-          );
-          console.log(chalk.gray(`   URL: ${finding.url}`));
-          console.log();
-          runSpinner.start("Continuing tests...");
-        },
+    const result = await drivers.execute(session, manager, {
+      headless: options.headless,
+      onFinding: (finding) => {
+        runSpinner.stop();
+        console.log(chalk.red(`⚠️  FINDING: ${finding.title}`));
+        console.log(chalk.gray(`   Step: ${finding.stepId}`));
+        console.log(
+          chalk.gray(`   Payload: ${finding.payload.slice(0, 50)}...`),
+        );
+        console.log(chalk.gray(`   URL: ${finding.url}`));
+        console.log();
+        runSpinner.start("Continuing tests...");
       },
-      { pluginManager: manager },
-    );
+    });
 
     runSpinner.succeed("Tests completed");
     console.log();

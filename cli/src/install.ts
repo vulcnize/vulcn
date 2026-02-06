@@ -1,6 +1,8 @@
-import { installBrowsers, checkBrowsers, type BrowserType } from "@vulcn/engine";
+import { installBrowsers, checkBrowsers } from "@vulcn/driver-browser";
 import chalk from "chalk";
 import ora from "ora";
+
+type BrowserType = "chromium" | "firefox" | "webkit";
 
 export async function installCommand(
   browsers?: string[],

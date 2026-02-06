@@ -20,6 +20,7 @@ import type {
   DetectContext,
   Finding,
 } from "@vulcn/engine";
+import type { Page } from "playwright";
 
 /**
  * Plugin configuration schema
@@ -216,8 +217,9 @@ const plugin: VulcnPlugin = {
       }
 
       try {
-        // Get page HTML content
-        const html = await ctx.page.content();
+        // Get page HTML content (cast from unknown to Playwright Page)
+        const page = ctx.page as Page;
+        const html = await page.content();
 
         // Search for all occurrences of the payload
         let searchIndex = 0;
@@ -280,7 +282,7 @@ const plugin: VulcnPlugin = {
               : `Input payload was reflected back in the ${contextLabel}. While not proof of XSS, this indicates the input is not properly sanitized.`,
             stepId: ctx.stepId,
             payload,
-            url: ctx.page.url(),
+            url: page.url(),
             evidence: surrounding.replace(/\s+/g, " ").trim(),
             metadata: {
               detectionMethod: "reflection",
