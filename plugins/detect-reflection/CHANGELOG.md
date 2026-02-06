@@ -1,5 +1,12 @@
 # @vulcn/plugin-detect-reflection
 
+## 1.0.0
+
+### Patch Changes
+
+- Updated dependencies [621502c]
+  - @vulcn/engine@0.3.0
+
 ## 0.1.0
 
 ### Minor Changes

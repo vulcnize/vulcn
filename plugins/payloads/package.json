@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/plugin-payloads",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Official payload loader plugin for Vulcn - built-in, PayloadBox, and custom file loading",
   "type": "module",
   "main": "dist/index.cjs",
@@ -46,7 +46,7 @@
     "directory": "plugins/payloads"
   },
   "peerDependencies": {
-    "@vulcn/engine": "^0.2.0"
+    "@vulcn/engine": "^0.3.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
