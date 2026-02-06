@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/plugin-payloads",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Official payload loader plugin for Vulcn - built-in, PayloadBox, and custom file loading",
   "type": "module",
   "main": "dist/index.cjs",

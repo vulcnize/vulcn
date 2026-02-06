@@ -1,6 +1,6 @@
 {
   "name": "vulcn",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Security testing CLI - Record once, test with payloads, find vulnerabilities",
   "type": "module",
   "bin": {

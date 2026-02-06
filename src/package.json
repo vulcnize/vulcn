@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/engine",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Security testing engine - Browser recording and payload injection for vulnerability detection",
   "type": "module",
   "main": "./dist/index.cjs",
