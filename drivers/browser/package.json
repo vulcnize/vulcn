@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/driver-browser",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Playwright-based browser driver for Vulcn — record and replay web application interactions for automated security testing and vulnerability scanning.",
   "type": "module",
   "main": "./dist/index.cjs",
