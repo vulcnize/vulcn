@@ -17,6 +17,7 @@ import type {
   RunResult,
   RunOptions,
   RecordOptions,
+  CrawlOptions,
   RecordingHandle,
   DriverLogger,
   DRIVER_API_VERSION,
@@ -196,6 +197,36 @@ export class DriverManager {
     }
 
     return driver.recorder.start(config, options);
+  }
+
+  /**
+   * Auto-crawl a URL using a driver.
+   *
+   * Uses the driver's optional crawl() method to automatically
+   * discover forms and injection points, returning Session[] that
+   * can be passed to execute().
+   *
+   * Not all drivers support this — only browser has crawl capability.
+   * CLI and API drivers will throw.
+   */
+  async crawl(
+    driverName: string,
+    config: Record<string, unknown>,
+    options: CrawlOptions = {},
+  ): Promise<Session[]> {
+    const driver = this.get(driverName);
+
+    if (!driver) {
+      throw new Error(`Driver "${driverName}" not found`);
+    }
+
+    if (!driver.recorder.crawl) {
+      throw new Error(
+        `Driver "${driverName}" does not support auto-crawl. Use manual recording instead.`,
+      );
+    }
+
+    return driver.recorder.crawl(config, options);
   }
 
   /**

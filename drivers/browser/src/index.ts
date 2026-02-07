@@ -20,6 +20,7 @@ import type {
   RunnerDriver,
   RecordingHandle,
   RecordOptions,
+  CrawlOptions,
   Session,
   Step,
   RunContext,
@@ -28,6 +29,7 @@ import type {
 
 import { BrowserRecorder } from "./recorder";
 import { BrowserRunner } from "./runner";
+import { crawlAndBuildSessions } from "./crawler";
 
 /**
  * Browser driver configuration schema
@@ -127,6 +129,22 @@ const recorderDriver: RecorderDriver = {
     const parsedConfig = configSchema.parse(config);
     return BrowserRecorder.start(parsedConfig, options);
   },
+
+  async crawl(
+    config: Record<string, unknown>,
+    options: CrawlOptions,
+  ): Promise<Session[]> {
+    const parsedConfig = configSchema.parse(config);
+    return crawlAndBuildSessions(
+      {
+        startUrl: parsedConfig.startUrl ?? "",
+        browser: parsedConfig.browser,
+        headless: parsedConfig.headless,
+        viewport: parsedConfig.viewport,
+      },
+      options,
+    );
+  },
 };
 
 /**
@@ -157,4 +175,5 @@ export default browserDriver;
 // Re-export utilities
 export { BrowserRecorder } from "./recorder";
 export { BrowserRunner } from "./runner";
+export { crawlAndBuildSessions } from "./crawler";
 export { launchBrowser, checkBrowsers, installBrowsers } from "./browser";
