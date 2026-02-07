@@ -51,6 +51,9 @@ importers:
       '@vulcn/engine':
         specifier: workspace:*
         version: link:..
+      '@vulcn/plugin-detect-sqli':
+        specifier: workspace:*
+        version: link:../plugins/detect-sqli
       '@vulcn/plugin-detect-xss':
         specifier: workspace:*
         version: link:../plugins/detect-xss

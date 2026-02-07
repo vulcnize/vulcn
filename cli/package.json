@@ -81,6 +81,7 @@
     "@vulcn/driver-browser": "workspace:*",
     "@vulcn/plugin-payloads": "workspace:*",
     "@vulcn/plugin-detect-xss": "workspace:*",
+    "@vulcn/plugin-detect-sqli": "workspace:*",
     "@vulcn/plugin-report": "workspace:*",
     "commander": "^13.1.0",
     "chalk": "^5.4.0",
