@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/plugin-report",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "Security report generation plugin for Vulcn — produces modern, branded HTML dashboards, machine-readable JSON for CI/CD, and YAML reports from penetration test results.",
   "type": "module",
   "main": "dist/index.cjs",
@@ -58,7 +58,7 @@
     "url": "https://github.com/vulcnize/vulcn/issues"
   },
   "peerDependencies": {
-    "@vulcn/engine": "^0.3.0"
+    "@vulcn/engine": "^0.4.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

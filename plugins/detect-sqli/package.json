@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/plugin-detect-sqli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "SQL injection detection plugin for Vulcn — detects error-based, timing-based, and UNION-based SQL injection vulnerabilities across MySQL, PostgreSQL, Oracle, SQLite, and MSSQL.",
   "type": "module",
   "main": "./dist/index.cjs",
