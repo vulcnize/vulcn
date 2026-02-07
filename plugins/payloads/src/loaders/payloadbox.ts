@@ -1,12 +1,18 @@
 /**
  * PayloadBox Loader
- * Fetches payloads from PayloadsAllTheThings GitHub repository
+ *
+ * Fetches payloads from PayloadsAllTheThings GitHub repository.
+ * This is the primary payload source for Vulcn — community-curated,
+ * battle-tested payloads from the largest security payload collection.
+ *
+ * Supports short aliases for convenience:
+ *   xss, sqli, xxe, cmd, redirect, traversal
  */
 
 import type { RuntimePayload, PayloadCategory } from "@vulcn/engine";
 
 /**
- * Supported PayloadBox types
+ * Canonical PayloadBox type names (as they appear in PayloadsAllTheThings)
  */
 export type PayloadBoxType =
   | "xss"
@@ -15,6 +21,32 @@ export type PayloadBoxType =
   | "command-injection"
   | "open-redirect"
   | "path-traversal";
+
+/**
+ * Short aliases → canonical PayloadBox types
+ *
+ * Users can use either:
+ *   vulcn run session.yml -p xss sqli
+ *   vulcn run session.yml -p sql-injection command-injection
+ */
+const ALIASES: Record<string, PayloadBoxType> = {
+  // Short aliases
+  xss: "xss",
+  sqli: "sql-injection",
+  sql: "sql-injection",
+  xxe: "xxe",
+  cmd: "command-injection",
+  command: "command-injection",
+  redirect: "open-redirect",
+  traversal: "path-traversal",
+  lfi: "path-traversal",
+
+  // Full names (identity mapping)
+  "sql-injection": "sql-injection",
+  "command-injection": "command-injection",
+  "open-redirect": "open-redirect",
+  "path-traversal": "path-traversal",
+};
 
 /**
  * PayloadsAllTheThings URLs - raw GitHub content
@@ -33,7 +65,7 @@ const PAYLOADBOX_URLS: Record<PayloadBoxType, string> = {
 };
 
 /**
- * Map PayloadBox types to our categories
+ * Map PayloadBox types to internal categories
  */
 const CATEGORY_MAP: Record<PayloadBoxType, PayloadCategory> = {
   xss: "xss",
@@ -45,40 +77,88 @@ const CATEGORY_MAP: Record<PayloadBoxType, PayloadCategory> = {
 };
 
 /**
+ * Human-readable descriptions
+ */
+const DESCRIPTIONS: Record<PayloadBoxType, string> = {
+  xss: "Cross-Site Scripting — script injection, event handlers, SVG payloads",
+  "sql-injection": "SQL Injection — auth bypass, UNION, error-based, blind",
+  xxe: "XML External Entity — file read, SSRF via XML",
+  "command-injection": "OS Command Injection — shell execution, pipe injection",
+  "open-redirect": "Open Redirect — URL redirect to attacker domain",
+  "path-traversal":
+    "Path Traversal — directory traversal with exotic encodings",
+};
+
+/**
  * Cache for fetched payloads
  */
 const cache: Map<PayloadBoxType, RuntimePayload> = new Map();
 
+// ── Public API ─────────────────────────────────────────────────────────
+
 /**
- * Get available PayloadBox types
+ * Get all available payload type names (canonical)
  */
 export function getPayloadBoxTypes(): PayloadBoxType[] {
   return Object.keys(PAYLOADBOX_URLS) as PayloadBoxType[];
 }
 
 /**
- * Check if a type is a valid PayloadBox type
+ * Get all short aliases
  */
-export function isPayloadBoxType(type: string): type is PayloadBoxType {
-  return type in PAYLOADBOX_URLS;
+export function getAliases(): Record<string, PayloadBoxType> {
+  return { ...ALIASES };
 }
 
 /**
- * Load payloads from PayloadBox
+ * Resolve a user-provided name to a canonical PayloadBox type.
  *
- * @param type - PayloadBox type (xss, sql-injection, etc.)
- * @param limit - Maximum number of payloads to include
- * @param fetchFn - Fetch function to use (for testing/DI)
+ * Accepts:
+ *   "xss"              → "xss"
+ *   "sqli"             → "sql-injection"
+ *   "sql-injection"    → "sql-injection"
+ *   "cmd"              → "command-injection"
+ *
+ * Returns null if the name doesn't match any known type.
+ */
+export function resolvePayloadType(name: string): PayloadBoxType | null {
+  const resolved = ALIASES[name.toLowerCase()];
+  return resolved ?? null;
+}
+
+/**
+ * Check if a name resolves to a valid PayloadBox type
+ */
+export function isValidPayloadName(name: string): boolean {
+  return resolvePayloadType(name) !== null;
+}
+
+/**
+ * Get description for a payload type
+ */
+export function getDescription(type: PayloadBoxType): string {
+  return DESCRIPTIONS[type] ?? type;
+}
+
+/**
+ * Load payloads from PayloadBox.
+ *
+ * Accepts both canonical names and short aliases:
+ *   loadPayloadBox("xss")     → fetches XSS payloads
+ *   loadPayloadBox("sqli")    → fetches SQL injection payloads
  */
 export async function loadPayloadBox(
-  type: string,
+  name: string,
   limit: number = 50,
   fetchFn: typeof fetch = globalThis.fetch,
 ): Promise<RuntimePayload> {
-  // Validate type
-  if (!isPayloadBoxType(type)) {
+  const type = resolvePayloadType(name);
+
+  if (!type) {
+    const available = getPayloadBoxTypes().join(", ");
+    const aliases = "xss, sqli, xxe, cmd, redirect, traversal";
     throw new Error(
-      `Unknown PayloadBox type: ${type}. Available: ${getPayloadBoxTypes().join(", ")}`,
+      `Unknown payload type: "${name}". Available: ${available}\nShort aliases: ${aliases}`,
     );
   }
 
@@ -106,13 +186,13 @@ export async function loadPayloadBox(
       .slice(0, limit);
 
     if (payloads.length === 0) {
-      throw new Error(`No payloads found in ${type}`);
+      throw new Error(`No payloads found for ${type}`);
     }
 
     const payload: RuntimePayload = {
-      name: `payloadbox:${type}`,
+      name: type,
       category: CATEGORY_MAP[type],
-      description: `PayloadsAllTheThings ${type} - ${payloads.length} payloads`,
+      description: `${DESCRIPTIONS[type]} (${payloads.length} payloads from PayloadsAllTheThings)`,
       payloads,
       detectPatterns: getDefaultPatterns(type),
       source: "payloadbox",
@@ -123,13 +203,15 @@ export async function loadPayloadBox(
     return payload;
   } catch (err) {
     throw new Error(
-      `Failed to fetch PayloadBox ${type}: ${err instanceof Error ? err.message : String(err)}`,
+      `Failed to fetch payloads for "${type}": ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 }
 
+// ── Internal ───────────────────────────────────────────────────────────
+
 /**
- * Get default detection patterns for PayloadBox types
+ * Default detection patterns for PayloadBox types
  */
 function getDefaultPatterns(type: PayloadBoxType): RegExp[] {
   switch (type) {

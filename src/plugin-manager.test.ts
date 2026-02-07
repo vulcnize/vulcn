@@ -111,7 +111,7 @@ describe("PluginManager", () => {
         description: "From plugin",
         payloads: ["' OR '1'='1"],
         detectPatterns: [],
-        source: "builtin",
+        source: "plugin",
       };
 
       const plugin: VulcnPlugin = {

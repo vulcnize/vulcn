@@ -23,13 +23,8 @@ describe("Payload Types", () => {
   });
 
   it("should define valid PayloadSource values", () => {
-    const sources: PayloadSource[] = [
-      "builtin",
-      "custom",
-      "payloadbox",
-      "plugin",
-    ];
-    expect(sources).toHaveLength(4);
+    const sources: PayloadSource[] = ["custom", "payloadbox", "plugin"];
+    expect(sources).toHaveLength(3);
   });
 
   it("should allow creating RuntimePayload objects", () => {
@@ -39,14 +34,14 @@ describe("Payload Types", () => {
       description: "Test XSS payloads",
       payloads: ["<script>alert(1)</script>"],
       detectPatterns: [/<script>/i],
-      source: "builtin",
+      source: "payloadbox",
     };
 
     expect(payload.name).toBe("test-xss");
     expect(payload.category).toBe("xss");
     expect(payload.payloads).toHaveLength(1);
     expect(payload.detectPatterns).toHaveLength(1);
-    expect(payload.source).toBe("builtin");
+    expect(payload.source).toBe("payloadbox");
   });
 
   it("should allow creating CustomPayload objects", () => {
