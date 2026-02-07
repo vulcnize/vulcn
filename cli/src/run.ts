@@ -50,7 +50,7 @@ export async function runCommand(sessionFile: string, options: RunOptions) {
     process.exit(1);
   }
 
-  // Add payloads from CLI options
+  // Add payloads from custom file
   if (options.payloadFile) {
     const customSpinner = ora("Loading custom payloads...").start();
     try {
@@ -66,49 +66,41 @@ export async function runCommand(sessionFile: string, options: RunOptions) {
     }
   }
 
-  // If specific payloads requested via CLI, add them
+  // Load payload types from --payload flag
   if (options.payload && options.payload.length > 0) {
-    const payloadSpinner = ora("Loading specified payloads...").start();
+    const payloadSpinner = ora("Fetching payloads...").start();
     try {
-      const { BUILTIN_PAYLOADS, loadPayloadBox } =
-        await import("@vulcn/plugin-payloads");
+      const { loadPayloadBox } = await import("@vulcn/plugin-payloads");
 
-      for (const spec of options.payload) {
-        if (spec.startsWith("payloadbox:")) {
-          // PayloadBox spec
-          const type = spec.slice("payloadbox:".length);
-          const payload = await loadPayloadBox(type);
-          manager.addPayloads([payload]);
-          payloadSpinner.text = `Loaded payloadbox:${type}`;
-        } else if (spec in BUILTIN_PAYLOADS) {
-          // Built-in payload
-          manager.addPayloads([BUILTIN_PAYLOADS[spec]]);
-        } else {
-          payloadSpinner.warn(`Unknown payload: ${spec}`);
-        }
+      for (const name of options.payload) {
+        payloadSpinner.text = `Fetching ${name}...`;
+        const payload = await loadPayloadBox(name);
+        manager.addPayloads([payload]);
       }
-      payloadSpinner.succeed(`Loaded ${options.payload.length} payload set(s)`);
+      payloadSpinner.succeed(
+        `Loaded ${options.payload.length} payload type(s)`,
+      );
     } catch (err) {
       payloadSpinner.fail(`Failed to load payloads: ${err}`);
       process.exit(1);
     }
   }
 
-  // If no payloads loaded yet, load defaults
+  // If no payloads loaded yet, default to XSS
   if (manager.getPayloads().length === 0) {
-    const defaultSpinner = ora("Loading default payloads...").start();
+    const defaultSpinner = ora("Fetching default payloads (xss)...").start();
     try {
-      const { BUILTIN_PAYLOADS } = await import("@vulcn/plugin-payloads");
-      // Add xss-basic as default
-      manager.addPayloads([BUILTIN_PAYLOADS["xss-basic"]]);
-      defaultSpinner.succeed("Using default payload: xss-basic");
+      const { loadPayloadBox } = await import("@vulcn/plugin-payloads");
+      const payload = await loadPayloadBox("xss");
+      manager.addPayloads([payload]);
+      defaultSpinner.succeed("Using default payloads: xss");
     } catch (err) {
       defaultSpinner.fail(`Failed to load default payloads: ${err}`);
       process.exit(1);
     }
   }
 
-  // Auto-load default detection plugin if not already configured
+  // Auto-load XSS detection plugin
   if (!manager.hasPlugin("@vulcn/plugin-detect-xss")) {
     const detectSpinner = ora("Loading XSS detection plugin...").start();
     try {
@@ -117,7 +109,27 @@ export async function runCommand(sessionFile: string, options: RunOptions) {
       detectSpinner.succeed("Loaded XSS detection plugin");
     } catch (err) {
       detectSpinner.fail(`Failed to load detect-xss plugin: ${err}`);
-      // Non-fatal: continue without detection
+    }
+  }
+
+  // Auto-load SQLi detection plugin when sqli payloads are used
+  const hasSqliPayloads = (options.payload ?? []).some((p) => {
+    const lower = p.toLowerCase();
+    return (
+      lower === "sqli" ||
+      lower === "sql" ||
+      lower === "sql-injection" ||
+      lower.includes("sql")
+    );
+  });
+  if (hasSqliPayloads && !manager.hasPlugin("@vulcn/plugin-detect-sqli")) {
+    const sqliSpinner = ora("Loading SQLi detection plugin...").start();
+    try {
+      const detectSqliPlugin = await import("@vulcn/plugin-detect-sqli");
+      manager.addPlugin(detectSqliPlugin.default);
+      sqliSpinner.succeed("Loaded SQLi detection plugin");
+    } catch (err) {
+      sqliSpinner.fail(`Failed to load detect-sqli plugin: ${err}`);
     }
   }
 
@@ -141,7 +153,6 @@ export async function runCommand(sessionFile: string, options: RunOptions) {
       );
     } catch (err) {
       reportSpinner.fail(`Failed to load report plugin: ${err}`);
-      // Non-fatal: continue without report
     }
   }
 

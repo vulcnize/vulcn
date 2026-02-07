@@ -1,0 +1,71 @@
+{
+  "name": "@vulcn/plugin-detect-sqli",
+  "version": "0.1.0",
+  "description": "SQL injection detection plugin for Vulcn — detects error-based, timing-based, and UNION-based SQL injection vulnerabilities across MySQL, PostgreSQL, Oracle, SQLite, and MSSQL.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "vulcn",
+    "plugin",
+    "sqli",
+    "sql-injection",
+    "vulnerability-detection",
+    "security-testing",
+    "penetration-testing",
+    "database-security",
+    "owasp",
+    "owasp-top-10",
+    "web-security",
+    "appsec",
+    "dast"
+  ],
+  "author": "rawlab",
+  "license": "AGPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vulcnize/vulcn.git",
+    "directory": "plugins/detect-sqli"
+  },
+  "homepage": "https://docs.vulcn.dev",
+  "bugs": {
+    "url": "https://github.com/vulcnize/vulcn/issues"
+  },
+  "peerDependencies": {
+    "@vulcn/engine": ">=0.3.0"
+  },
+  "dependencies": {
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@vulcn/engine": "workspace:*",
+    "playwright": "^1.50.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0"
+  }
+}

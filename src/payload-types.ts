@@ -20,7 +20,7 @@ export type PayloadCategory =
 /**
  * Payload source types
  */
-export type PayloadSource = "builtin" | "custom" | "payloadbox" | "plugin";
+export type PayloadSource = "custom" | "payloadbox" | "plugin";
 
 /**
  * Runtime payload structure - used by plugins and the runner
