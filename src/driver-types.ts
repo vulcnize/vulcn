@@ -104,8 +104,38 @@ export interface RunContext {
  * Options for recording
  */
 export interface RecordOptions {
+  /** Enable auto-crawl mode (driver discovers forms automatically) */
+  auto?: boolean;
+
+  /** Crawl options (only used when auto=true) */
+  crawlOptions?: CrawlOptions;
+
   /** Driver-specific options */
   [key: string]: unknown;
+}
+
+/**
+ * Options for auto-crawl mode
+ *
+ * When a driver supports crawling, these options control how
+ * the automated discovery works. Not all drivers support crawling —
+ * it's optional and primarily used by the browser driver.
+ */
+export interface CrawlOptions {
+  /** Maximum crawl depth (0 = only the given URL, default: 2) */
+  maxDepth?: number;
+
+  /** Maximum number of pages to visit (default: 20) */
+  maxPages?: number;
+
+  /** Timeout per page navigation in ms (default: 10000) */
+  pageTimeout?: number;
+
+  /** Only crawl pages under the same origin (default: true) */
+  sameOrigin?: boolean;
+
+  /** Callback when a page is crawled */
+  onPageCrawled?: (url: string, formsFound: number) => void;
 }
 
 /**
@@ -166,6 +196,20 @@ export interface RecorderDriver {
     config: Record<string, unknown>,
     options: RecordOptions,
   ): Promise<RecordingHandle>;
+
+  /**
+   * Auto-crawl a URL and generate sessions.
+   *
+   * Optional — only drivers that support automated discovery
+   * (e.g., browser) implement this. CLI and API drivers do not.
+   *
+   * When options.auto=true is passed to startRecording, the engine
+   * calls this instead of start().
+   */
+  crawl?(
+    config: Record<string, unknown>,
+    options: CrawlOptions,
+  ): Promise<Session[]>;
 }
 
 /**

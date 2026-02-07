@@ -30,6 +30,7 @@ export type {
   RunnerDriver,
   RecordingHandle,
   RecordOptions,
+  CrawlOptions,
   RunOptions,
   RunResult,
   RunContext,

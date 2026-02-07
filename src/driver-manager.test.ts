@@ -259,6 +259,116 @@ describe("DriverManager", () => {
     });
   });
 
+  describe("crawl", () => {
+    it("should call driver's crawl method when supported", async () => {
+      const mockSessions: Session[] = [
+        {
+          name: "Crawled Session",
+          driver: "crawlable",
+          driverConfig: { startUrl: "http://test.com" },
+          steps: [
+            { id: "step-1", type: "crawlable.navigate", timestamp: 0 },
+            { id: "step-2", type: "crawlable.input", timestamp: 100 },
+          ],
+        },
+      ];
+
+      const driver: VulcnDriver = {
+        name: "crawlable",
+        version: "1.0.0",
+        stepTypes: ["crawlable.action"],
+        recorder: {
+          async start() {
+            return {} as RecordingHandle;
+          },
+          async crawl(_config, _options) {
+            return mockSessions;
+          },
+        },
+        runner: {
+          async execute(_session, _ctx): Promise<RunResult> {
+            return {
+              findings: [],
+              stepsExecuted: 0,
+              payloadsTested: 0,
+              duration: 0,
+              errors: [],
+            };
+          },
+        },
+      };
+      manager.register(driver);
+
+      const sessions = await manager.crawl("crawlable", {
+        startUrl: "http://test.com",
+      });
+      expect(sessions).toEqual(mockSessions);
+      expect(sessions.length).toBe(1);
+      expect(sessions[0].name).toBe("Crawled Session");
+    });
+
+    it("should pass config and options to driver crawl", async () => {
+      let receivedConfig: Record<string, unknown> = {};
+      let receivedOptions = {};
+
+      const driver: VulcnDriver = {
+        name: "spy",
+        version: "1.0.0",
+        stepTypes: ["spy.action"],
+        recorder: {
+          async start() {
+            return {} as RecordingHandle;
+          },
+          async crawl(config, options) {
+            receivedConfig = config;
+            receivedOptions = options;
+            return [];
+          },
+        },
+        runner: {
+          async execute(): Promise<RunResult> {
+            return {
+              findings: [],
+              stepsExecuted: 0,
+              payloadsTested: 0,
+              duration: 0,
+              errors: [],
+            };
+          },
+        },
+      };
+      manager.register(driver);
+
+      await manager.crawl(
+        "spy",
+        { startUrl: "http://example.com", headless: true },
+        { maxDepth: 3, maxPages: 10 },
+      );
+
+      expect(receivedConfig).toEqual({
+        startUrl: "http://example.com",
+        headless: true,
+      });
+      expect(receivedOptions).toEqual({ maxDepth: 3, maxPages: 10 });
+    });
+
+    it("should throw for missing driver", async () => {
+      await expect(manager.crawl("missing", {})).rejects.toThrow(
+        'Driver "missing" not found',
+      );
+    });
+
+    it("should throw when driver does not support crawl", async () => {
+      // Register a driver WITHOUT the crawl method
+      const driver = createMockDriver("nocrawl");
+      manager.register(driver);
+
+      await expect(manager.crawl("nocrawl", {})).rejects.toThrow(
+        'Driver "nocrawl" does not support auto-crawl',
+      );
+    });
+  });
+
   describe("execute", () => {
     it("should execute session with driver", async () => {
       const driver = createMockDriver("test");
