@@ -1,5 +1,12 @@
 # @vulcn/plugin-report
 
+## 0.6.0
+
+### Patch Changes
+
+- Updated dependencies [458572e]
+  - @vulcn/engine@0.7.0
+
 ## 0.5.0
 
 ### Minor Changes
