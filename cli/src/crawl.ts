@@ -131,17 +131,13 @@ export async function crawlCommand(url: string, options: CrawlOptions) {
 
     console.log();
     console.log(chalk.gray("Next steps:"));
-    console.log(
-      chalk.white(
-        `  vulcn run ${savedFiles[0]} --payload xss-basic sqli-basic`,
-      ),
-    );
+    console.log(chalk.white(`  vulcn run ${savedFiles[0]} -p xss sqli`));
 
     if (sessions.length > 1) {
       console.log();
       console.log(chalk.gray("Run all sessions:"));
       for (const file of savedFiles) {
-        console.log(chalk.white(`  vulcn run ${file} --payload xss-basic`));
+        console.log(chalk.white(`  vulcn run ${file} -p xss`));
       }
     }
 

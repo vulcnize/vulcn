@@ -12,6 +12,7 @@ interface RunOptions {
   config?: string;
   report?: string;
   reportOutput?: string;
+  passive?: boolean;
 }
 
 export async function runCommand(sessionFile: string, options: RunOptions) {
@@ -130,6 +131,18 @@ export async function runCommand(sessionFile: string, options: RunOptions) {
       sqliSpinner.succeed("Loaded SQLi detection plugin");
     } catch (err) {
       sqliSpinner.fail(`Failed to load detect-sqli plugin: ${err}`);
+    }
+  }
+
+  // Auto-load passive scanner plugin if --passive is specified
+  if (options.passive && !manager.hasPlugin("@vulcn/plugin-passive")) {
+    const passiveSpinner = ora("Loading passive scanner plugin...").start();
+    try {
+      const passivePlugin = await import("@vulcn/plugin-passive");
+      manager.addPlugin(passivePlugin.default);
+      passiveSpinner.succeed("Loaded passive security scanner");
+    } catch (err) {
+      passiveSpinner.fail(`Failed to load passive scanner plugin: ${err}`);
     }
   }
 

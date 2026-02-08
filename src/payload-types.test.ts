@@ -17,9 +17,12 @@ describe("Payload Types", () => {
       "command-injection",
       "path-traversal",
       "open-redirect",
+      "reflection",
+      "security-misconfiguration",
+      "information-disclosure",
       "custom",
     ];
-    expect(categories).toHaveLength(8);
+    expect(categories).toHaveLength(11);
   });
 
   it("should define valid PayloadSource values", () => {

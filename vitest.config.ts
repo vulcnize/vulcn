@@ -11,7 +11,12 @@ export default defineConfig({
         singleThread: !!process.env.CI,
       },
     },
-    include: ["src/**/*.test.ts", "cli/**/*.test.ts", "test/**/*.test.ts"],
+    include: [
+      "src/**/*.test.ts",
+      "cli/**/*.test.ts",
+      "test/**/*.test.ts",
+      "plugins/**/*.test.ts",
+    ],
     exclude: ["**/node_modules/**", "**/dist/**"],
     setupFiles: ["test/setup.ts"],
     coverage: {

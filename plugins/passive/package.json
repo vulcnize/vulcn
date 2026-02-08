@@ -1,11 +1,11 @@
 {
-  "name": "@vulcn/plugin-report",
-  "version": "0.3.0",
-  "description": "Security report generation plugin for Vulcn — produces HTML dashboards, JSON, YAML, and SARIF v2.1.0 reports for GitHub Code Scanning and CI/CD integration.",
+  "name": "@vulcn/plugin-passive",
+  "version": "0.1.0",
+  "description": "Passive security scanner for Vulcn — detects missing security headers, insecure cookies, information disclosure, CORS misconfigurations, and mixed content without injecting payloads.",
   "type": "module",
-  "main": "dist/index.cjs",
-  "module": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "publishConfig": {
     "access": "public"
   },
@@ -27,50 +27,47 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "vulcn",
     "plugin",
-    "security-report",
-    "pentest-report",
-    "vulnerability-report",
-    "html-report",
-    "json-report",
-    "sarif",
-    "sarif-report",
-    "github-code-scanning",
+    "passive-scan",
+    "security-headers",
+    "cookie-security",
+    "information-disclosure",
+    "cors",
+    "mixed-content",
+    "csp",
+    "hsts",
     "security-testing",
     "penetration-testing",
-    "security-dashboard",
-    "dast",
-    "ci-cd",
-    "security-automation",
-    "appsec"
+    "web-security",
+    "owasp",
+    "dast"
   ],
   "author": "rawlab",
   "license": "AGPL-3.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vulcnize/vulcn.git",
-    "directory": "plugins/report"
+    "directory": "plugins/passive"
   },
   "homepage": "https://docs.vulcn.dev",
   "bugs": {
     "url": "https://github.com/vulcnize/vulcn/issues"
   },
   "peerDependencies": {
-    "@vulcn/engine": "^0.4.0"
+    "@vulcn/engine": ">=0.4.0"
+  },
+  "dependencies": {
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@vulcn/engine": "workspace:*",
-    "tsup": "^8.0.0",
+    "playwright": "^1.50.0",
+    "tsup": "^8.4.0",
     "typescript": "^5.7.0"
-  },
-  "dependencies": {
-    "yaml": "^2.4.0",
-    "zod": "^3.24.0"
   }
 }

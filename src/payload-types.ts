@@ -15,6 +15,8 @@ export type PayloadCategory =
   | "path-traversal"
   | "open-redirect"
   | "reflection"
+  | "security-misconfiguration"
+  | "information-disclosure"
   | "custom";
 
 /**
