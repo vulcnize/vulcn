@@ -134,8 +134,11 @@ export async function runCommand(sessionFile: string, options: RunOptions) {
     }
   }
 
-  // Auto-load passive scanner plugin if --passive is specified
-  if (options.passive && !manager.hasPlugin("@vulcn/plugin-passive")) {
+  // Auto-load passive scanner plugin (enabled by default, disable with --no-passive)
+  if (
+    options.passive !== false &&
+    !manager.hasPlugin("@vulcn/plugin-passive")
+  ) {
     const passiveSpinner = ora("Loading passive scanner plugin...").start();
     try {
       const passivePlugin = await import("@vulcn/plugin-passive");

@@ -2,10 +2,12 @@
  * SARIF Generator Tests
  *
  * Validates SARIF v2.1.0 output structure and correctness.
+ * Tests go through the canonical model: buildReport() → generateSarif().
  */
 
 import { describe, it, expect } from "vitest";
 import { generateSarif } from "../src/sarif";
+import { buildReport } from "../src/report-model";
 import type { Finding, RunResult, Session } from "@vulcn/engine";
 
 const mockSession: Session = {
@@ -55,29 +57,28 @@ function makeResult(findings: Finding[] = [makeFinding()]): RunResult {
   };
 }
 
+/** Helper: build report then generate SARIF */
+function toSarif(findings?: Finding[], overrides?: Partial<RunResult>) {
+  const result = { ...makeResult(findings), ...overrides };
+  const report = buildReport(
+    mockSession,
+    result,
+    "2026-02-08T00:00:00.000Z",
+    "0.4.0",
+  );
+  return generateSarif(report);
+}
+
 describe("generateSarif", () => {
   it("should produce valid SARIF v2.1.0 structure", () => {
-    const sarif = generateSarif(
-      mockSession,
-      makeResult(),
-      "2026-02-08T00:00:00.000Z",
-      "0.4.0",
-    );
-
-    // Top-level structure
+    const sarif = toSarif();
     expect(sarif.$schema).toContain("sarif-schema-2.1.0");
     expect(sarif.version).toBe("2.1.0");
     expect(sarif.runs).toHaveLength(1);
   });
 
   it("should populate tool driver info", () => {
-    const sarif = generateSarif(
-      mockSession,
-      makeResult(),
-      "2026-02-08T00:00:00.000Z",
-      "0.4.0",
-    );
-
+    const sarif = toSarif();
     const driver = sarif.runs[0].tool.driver;
     expect(driver.name).toBe("Vulcn");
     expect(driver.version).toBe("0.4.0");
@@ -91,26 +92,17 @@ describe("generateSarif", () => {
       makeFinding({ type: "xss", severity: "high" }), // duplicate type
       makeFinding({ type: "sqli", severity: "critical" }),
     ];
-    const sarif = generateSarif(
-      mockSession,
-      makeResult(findings),
-      "2026-02-08T00:00:00.000Z",
-      "0.4.0",
-    );
+    const sarif = toSarif(findings);
 
     const rules = sarif.runs[0].tool.driver.rules;
     expect(rules).toHaveLength(2); // xss + sqli, not 3
-    expect(rules[0].id).toBe("VULCN-XSS");
-    expect(rules[1].id).toBe("VULCN-SQLI");
+    // Rules are ordered by severity: critical (SQLI) before high (XSS)
+    expect(rules[0].id).toBe("VULCN-SQLI");
+    expect(rules[1].id).toBe("VULCN-XSS");
   });
 
   it("should include CWE tags on rules", () => {
-    const sarif = generateSarif(
-      mockSession,
-      makeResult([makeFinding({ type: "xss" })]),
-      "2026-02-08T00:00:00.000Z",
-      "0.4.0",
-    );
+    const sarif = toSarif([makeFinding({ type: "xss" })]);
 
     const rule = sarif.runs[0].tool.driver.rules[0];
     expect(rule.properties.tags).toContain("security");
@@ -127,14 +119,10 @@ describe("generateSarif", () => {
       makeFinding({ severity: "low", type: "reflection" }),
     ];
 
-    const sarif = generateSarif(
-      mockSession,
-      makeResult(findings),
-      "2026-02-08T00:00:00.000Z",
-      "0.4.0",
-    );
-
+    const sarif = toSarif(findings);
     const results = sarif.runs[0].results;
+
+    // Results are sorted by severity (critical first)
     expect(results[0].level).toBe("error"); // critical
     expect(results[1].level).toBe("error"); // high
     expect(results[2].level).toBe("warning"); // medium
@@ -142,24 +130,18 @@ describe("generateSarif", () => {
   });
 
   it("should map severities to security-severity scores", () => {
-    const sarif = generateSarif(
-      mockSession,
-      makeResult([makeFinding({ severity: "critical", type: "sqli" })]),
-      "2026-02-08T00:00:00.000Z",
-      "0.4.0",
-    );
+    const sarif = toSarif([
+      makeFinding({ severity: "critical", type: "sqli" }),
+    ]);
 
     const rule = sarif.runs[0].tool.driver.rules[0];
     expect(rule.properties["security-severity"]).toBe("9.0");
   });
 
   it("should create results with locations from finding URLs", () => {
-    const sarif = generateSarif(
-      mockSession,
-      makeResult([makeFinding({ url: "https://example.com/api/search" })]),
-      "2026-02-08T00:00:00.000Z",
-      "0.4.0",
-    );
+    const sarif = toSarif([
+      makeFinding({ url: "https://example.com/api/search" }),
+    ]);
 
     const result = sarif.runs[0].results[0];
     expect(result.locations).toHaveLength(1);
@@ -169,17 +151,12 @@ describe("generateSarif", () => {
   });
 
   it("should include evidence and payload in result message", () => {
-    const sarif = generateSarif(
-      mockSession,
-      makeResult([
-        makeFinding({
-          evidence: "alert(1) dialog triggered",
-          payload: "<img onerror=alert(1)>",
-        }),
-      ]),
-      "2026-02-08T00:00:00.000Z",
-      "0.4.0",
-    );
+    const sarif = toSarif([
+      makeFinding({
+        evidence: "alert(1) dialog triggered",
+        payload: "<img onerror=alert(1)>",
+      }),
+    ]);
 
     const message = sarif.runs[0].results[0].message.text;
     expect(message).toContain("alert(1) dialog triggered");
@@ -187,13 +164,7 @@ describe("generateSarif", () => {
   });
 
   it("should populate invocation metadata", () => {
-    const sarif = generateSarif(
-      mockSession,
-      makeResult(),
-      "2026-02-08T00:00:00.000Z",
-      "0.4.0",
-    );
-
+    const sarif = toSarif();
     const invocation = sarif.runs[0].invocations[0];
     expect(invocation.executionSuccessful).toBe(true);
     expect(invocation.startTimeUtc).toBe("2026-02-08T00:00:00.000Z");
@@ -203,15 +174,9 @@ describe("generateSarif", () => {
   });
 
   it("should mark invocation as unsuccessful when errors exist", () => {
-    const result = makeResult();
-    result.errors = ["Step 1 timed out"];
-
-    const sarif = generateSarif(
-      mockSession,
-      result,
-      "2026-02-08T00:00:00.000Z",
-      "0.4.0",
-    );
+    const sarif = toSarif(undefined, {
+      errors: ["Step 1 timed out"],
+    });
 
     const invocation = sarif.runs[0].invocations[0];
     expect(invocation.executionSuccessful).toBe(false);
@@ -225,13 +190,7 @@ describe("generateSarif", () => {
       makeFinding({ url: "https://example.com/login" }),
     ];
 
-    const sarif = generateSarif(
-      mockSession,
-      makeResult(findings),
-      "2026-02-08T00:00:00.000Z",
-      "0.4.0",
-    );
-
+    const sarif = toSarif(findings);
     expect(sarif.runs[0].artifacts).toHaveLength(2);
     expect(sarif.runs[0].artifacts![0].location.uri).toBe(
       "https://example.com/search",
@@ -242,13 +201,7 @@ describe("generateSarif", () => {
   });
 
   it("should handle zero findings gracefully", () => {
-    const sarif = generateSarif(
-      mockSession,
-      makeResult([]),
-      "2026-02-08T00:00:00.000Z",
-      "0.4.0",
-    );
-
+    const sarif = toSarif([]);
     expect(sarif.runs[0].results).toHaveLength(0);
     expect(sarif.runs[0].tool.driver.rules).toHaveLength(0);
     expect(sarif.runs[0].artifacts).toBeUndefined();
@@ -261,18 +214,8 @@ describe("generateSarif", () => {
       payload: "<script>alert(1)</script>",
     });
 
-    const sarif1 = generateSarif(
-      mockSession,
-      makeResult([finding]),
-      "2026-02-08T00:00:00.000Z",
-      "0.4.0",
-    );
-    const sarif2 = generateSarif(
-      mockSession,
-      makeResult([finding]),
-      "2026-02-08T00:00:00.000Z",
-      "0.4.0",
-    );
+    const sarif1 = toSarif([finding]);
+    const sarif2 = toSarif([finding]);
 
     expect(sarif1.runs[0].results[0].fingerprints).toEqual(
       sarif2.runs[0].results[0].fingerprints,
@@ -290,12 +233,7 @@ describe("generateSarif", () => {
     ];
 
     for (const type of types) {
-      const sarif = generateSarif(
-        mockSession,
-        makeResult([makeFinding({ type: type as Finding["type"] })]),
-        "2026-02-08T00:00:00.000Z",
-        "0.4.0",
-      );
+      const sarif = toSarif([makeFinding({ type: type as Finding["type"] })]);
 
       const rule = sarif.runs[0].tool.driver.rules[0];
       expect(rule.properties.tags.some((t) => t.startsWith("CWE-"))).toBe(true);

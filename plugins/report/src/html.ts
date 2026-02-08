@@ -9,14 +9,12 @@
  * - Responsive design
  */
 
-import type { Finding, RunResult, Session } from "@vulcn/engine";
-
-export interface HtmlReportData {
-  session: Session;
-  result: RunResult;
-  generatedAt: string;
-  engineVersion: string;
-}
+import type {
+  VulcnReport,
+  EnrichedFinding,
+  PassiveCategorySummary,
+} from "./report-model";
+import { formatDuration } from "./report-model";
 
 // Vulcn brand colors
 const COLORS = {
@@ -82,12 +80,6 @@ function escapeHtml(str: string): string {
     .replace(/'/g, "&#039;");
 }
 
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = (ms / 1000).toFixed(1);
-  return `${seconds}s`;
-}
-
 function formatDate(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleDateString("en-US", {
@@ -117,61 +109,130 @@ const VULCN_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 
   <path fill="url(#lg2)" d="m 14.0058,8.89 c -0.164,1.484 -0.749,2.568 -1.659,3.353 -0.418,0.36 -0.465,0.992 -0.104,1.41 0.36,0.418 0.992,0.465 1.41,0.104 1.266,-1.092 2.112,-2.583 2.341,-4.647 0.061,-0.548 -0.335,-1.043 -0.884,-1.104 -0.548,-0.061 -1.043,0.335 -1.104,0.884 z"/>
 </svg>`;
 
-export function generateHtml(data: HtmlReportData): string {
-  const { session, result, generatedAt, engineVersion } = data;
-  const findings = [...result.findings].sort(
-    (a, b) => severityOrder(a.severity) - severityOrder(b.severity),
-  );
-
-  // Severity counts for donut chart
-  const counts: Record<string, number> = {
-    critical: 0,
-    high: 0,
-    medium: 0,
-    low: 0,
-    info: 0,
-  };
-  for (const f of findings) {
-    counts[f.severity] = (counts[f.severity] || 0) + 1;
+function renderPassiveSection(
+  analysis: VulcnReport["passiveAnalysis"],
+): string {
+  if (analysis.totalIssues === 0) {
+    return `
+    <div class="passive-section animate-in-delay-3">
+      <div class="section-header">
+        <h3>🛡️ Passive Security Analysis</h3>
+        <span class="findings-count">All clear</span>
+      </div>
+      <div class="passive-clear">
+        <div class="icon">✅</div>
+        <h4>All Passive Checks Passed</h4>
+        <p>No security header, cookie, CORS, or information disclosure issues detected.</p>
+      </div>
+    </div>`;
   }
 
-  const totalFindings = findings.length;
+  const categoryCards = analysis.categories
+    .map((cat) => {
+      const statusColor =
+        cat.status === "pass"
+          ? COLORS.success
+          : cat.status === "fail"
+            ? COLORS.high
+            : COLORS.medium;
+
+      return `
+      <div class="passive-category-card">
+        <div class="passive-cat-header">
+          <div class="passive-cat-icon">${cat.definition.icon}</div>
+          <div class="passive-cat-info">
+            <div class="passive-cat-title">${cat.definition.label}</div>
+            <div class="passive-cat-count" style="color: ${statusColor}">
+              ${cat.issueCount === 0 ? "✓ All clear" : `${cat.issueCount} issue${cat.issueCount !== 1 ? "s" : ""}`}
+            </div>
+          </div>
+          <div class="passive-cat-badge" style="background: ${statusColor}20; color: ${statusColor}; border-color: ${statusColor}30">
+            ${cat.status.toUpperCase()}
+          </div>
+        </div>
+        ${
+          cat.findings.length > 0
+            ? `
+        <div class="passive-cat-findings">
+          ${cat.findings
+            .map(
+              (f) => `
+            <div class="passive-finding-row">
+              <div class="passive-finding-dot" style="background: ${severityColor(f.severity)}"></div>
+              <div class="passive-finding-content">
+                <div class="passive-finding-title">${escapeHtml(f.title)}</div>
+                <div class="passive-finding-desc">${escapeHtml(f.description)}</div>
+                ${f.evidence ? `<div class="passive-finding-evidence">${escapeHtml(f.evidence)}</div>` : ""}
+              </div>
+              <span class="passive-sev-tag" style="color: ${severityColor(f.severity)}">${f.severity.toUpperCase()}</span>
+            </div>
+          `,
+            )
+            .join("")}
+        </div>
+        <div class="passive-remedy">
+          <span class="passive-remedy-label">💡 Remediation</span>
+          <span>${cat.definition.remedy}</span>
+        </div>
+        `
+            : `
+        <div class="passive-checks-passed">
+          ${cat.definition.checks
+            .map(
+              (check) => `
+            <div class="passive-check-item">
+              <span class="passive-check-icon">✓</span>
+              <span>${check}</span>
+            </div>
+          `,
+            )
+            .join("")}
+        </div>
+        `
+        }
+      </div>`;
+    })
+    .join("");
+
+  return `
+    <div class="passive-section animate-in-delay-3">
+      <div class="section-header">
+        <h3>🛡️ Passive Security Analysis</h3>
+        <span class="findings-count">${analysis.totalIssues} issue${analysis.totalIssues !== 1 ? "s" : ""}</span>
+      </div>
+      <div class="passive-grid">
+        ${categoryCards}
+      </div>
+    </div>`;
+}
+
+export function generateHtml(report: VulcnReport): string {
+  // All data comes from the canonical model — no duplicate computation
+  const { summary, stats, session, passiveAnalysis, activeFindings, findings } =
+    report;
+  const {
+    severityCounts: counts,
+    risk,
+    totalFindings,
+    affectedUrls,
+    vulnerabilityTypes: vulnTypes,
+  } = summary;
+  const { stepsExecuted, payloadsTested, durationMs, errors } = stats;
   const hasFindings = totalFindings > 0;
 
-  // Overall risk score
-  const riskScore =
-    counts.critical * 10 + counts.high * 7 + counts.medium * 4 + counts.low * 1;
-  const maxRisk = totalFindings * 10 || 1;
-  const riskPercent = Math.min(100, Math.round((riskScore / maxRisk) * 100));
-  const riskLabel =
-    riskPercent >= 80
-      ? "Critical"
-      : riskPercent >= 50
-        ? "High"
-        : riskPercent >= 25
-          ? "Medium"
-          : riskPercent > 0
-            ? "Low"
-            : "Clear";
   const riskColor =
-    riskPercent >= 80
+    risk.percent >= 80
       ? COLORS.critical
-      : riskPercent >= 50
+      : risk.percent >= 50
         ? COLORS.high
-        : riskPercent >= 25
+        : risk.percent >= 25
           ? COLORS.medium
-          : riskPercent > 0
+          : risk.percent > 0
             ? COLORS.low
             : COLORS.success;
 
   // Donut chart SVG segments
   const donutSvg = generateDonut(counts, totalFindings);
-
-  // Unique URLs affected
-  const affectedUrls = [...new Set(findings.map((f) => f.url))];
-
-  // Unique vuln types
-  const vulnTypes = [...new Set(findings.map((f) => f.type))];
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -664,6 +725,180 @@ export function generateHtml(data: HtmlReportData): string {
     .no-findings h3 { font-size: 20px; font-weight: 700; color: ${COLORS.success}; margin-bottom: 8px; }
     .no-findings p { font-size: 14px; color: var(--text-muted); }
 
+    /* ── Passive Security Analysis ──────────────────────────────────── */
+    .passive-section { margin-bottom: 32px; }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .section-header h3 {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .passive-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 12px;
+    }
+
+    .passive-category-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+
+    .passive-category-card:hover { border-color: var(--border-active); }
+
+    .passive-cat-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .passive-cat-icon {
+      font-size: 20px;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255,255,255,0.03);
+      border-radius: var(--radius-xs);
+      flex-shrink: 0;
+    }
+
+    .passive-cat-info { flex: 1; min-width: 0; }
+
+    .passive-cat-title {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .passive-cat-count {
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .passive-cat-badge {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      padding: 3px 8px;
+      border-radius: 100px;
+      border: 1px solid;
+      flex-shrink: 0;
+    }
+
+    .passive-cat-findings {
+      padding: 12px 20px;
+    }
+
+    .passive-finding-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+    }
+
+    .passive-finding-row:last-child { border-bottom: none; }
+
+    .passive-finding-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      margin-top: 7px;
+    }
+
+    .passive-finding-content { flex: 1; min-width: 0; }
+
+    .passive-finding-title {
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 2px;
+    }
+
+    .passive-finding-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    .passive-finding-evidence {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 4px;
+      padding: 4px 8px;
+      background: rgba(255,255,255,0.02);
+      border-radius: 4px;
+    }
+
+    .passive-sev-tag {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .passive-remedy {
+      padding: 12px 20px;
+      background: rgba(66, 165, 245, 0.04);
+      border-top: 1px solid rgba(66, 165, 245, 0.08);
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .passive-remedy-label {
+      font-weight: 600;
+      margin-right: 6px;
+    }
+
+    .passive-checks-passed {
+      padding: 12px 20px;
+    }
+
+    .passive-check-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .passive-check-icon {
+      color: ${COLORS.success};
+      font-weight: 700;
+      font-size: 11px;
+    }
+
+    .passive-clear {
+      text-align: center;
+      padding: 40px 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
+    .passive-clear .icon { font-size: 36px; margin-bottom: 12px; }
+    .passive-clear h4 { font-size: 16px; font-weight: 600; color: ${COLORS.success}; margin-bottom: 6px; }
+    .passive-clear p { font-size: 13px; color: var(--text-muted); }
+
     /* Errors section */
     .errors-section {
       margin-bottom: 32px;
@@ -728,6 +963,7 @@ export function generateHtml(data: HtmlReportData): string {
       body::before { display: none; }
       .finding-details { display: block !important; padding-top: 12px !important; }
       .finding-card { page-break-inside: avoid; }
+      .passive-category-card { page-break-inside: avoid; }
     }
   </style>
 </head>
@@ -743,8 +979,8 @@ export function generateHtml(data: HtmlReportData): string {
         </div>
       </div>
       <div class="header-meta">
-        <div>${formatDate(generatedAt)}</div>
-        <div>Engine v${escapeHtml(engineVersion)}</div>
+        <div>${formatDate(report.generatedAt)}</div>
+        <div>Engine v${escapeHtml(report.engineVersion)}</div>
       </div>
     </div>
 
@@ -759,11 +995,11 @@ export function generateHtml(data: HtmlReportData): string {
         ${session.driverConfig?.startUrl ? `<div class="meta-item"><span class="meta-label">Target URL</span><span class="meta-value">${escapeHtml(String(session.driverConfig.startUrl))}</span></div>` : ""}
         <div class="meta-item">
           <span class="meta-label">Duration</span>
-          <span class="meta-value">${formatDuration(result.duration)}</span>
+          <span class="meta-value">${formatDuration(durationMs)}</span>
         </div>
         <div class="meta-item">
           <span class="meta-label">Generated</span>
-          <span class="meta-value">${formatDate(generatedAt)}</span>
+          <span class="meta-value">${formatDate(report.generatedAt)}</span>
         </div>
       </div>
     </div>
@@ -776,13 +1012,13 @@ export function generateHtml(data: HtmlReportData): string {
           <svg viewBox="0 0 160 160" width="160" height="160">
             <circle cx="80" cy="80" r="68" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="10"/>
             <circle cx="80" cy="80" r="68" fill="none" stroke="${riskColor}" stroke-width="10"
-              stroke-dasharray="${(riskPercent / 100) * 427} 427"
+              stroke-dasharray="${(risk.percent / 100) * 427} 427"
               stroke-linecap="round"
               style="filter: drop-shadow(0 0 6px ${riskColor});"/>
           </svg>
           <div class="risk-gauge-label">
-            <div class="score" style="color: ${riskColor}">${hasFindings ? riskPercent : 0}</div>
-            <div class="label">${riskLabel}</div>
+            <div class="score" style="color: ${riskColor}">${hasFindings ? risk.percent : 0}</div>
+            <div class="label">${risk.label}</div>
           </div>
         </div>
       </div>
@@ -795,11 +1031,11 @@ export function generateHtml(data: HtmlReportData): string {
             <div class="stat-label">Findings</div>
           </div>
           <div class="stat-box">
-            <div class="stat-number">${result.payloadsTested}</div>
+            <div class="stat-number">${payloadsTested}</div>
             <div class="stat-label">Payloads Tested</div>
           </div>
           <div class="stat-box">
-            <div class="stat-number">${result.stepsExecuted}</div>
+            <div class="stat-number">${stepsExecuted}</div>
             <div class="stat-label">Steps Executed</div>
           </div>
           <div class="stat-box">
@@ -813,7 +1049,7 @@ export function generateHtml(data: HtmlReportData): string {
     <!-- Severity breakdown -->
     <div class="severity-breakdown animate-in-delay-2">
       <div class="severity-bars">
-        ${["critical", "high", "medium", "low", "info"]
+        ${(["critical", "high", "medium", "low", "info"] as const)
           .map(
             (sev) => `
           <div class="severity-bar-item">
@@ -829,16 +1065,19 @@ export function generateHtml(data: HtmlReportData): string {
       </div>
     </div>
 
-    <!-- Findings -->
+    <!-- Passive Security Analysis -->
+    ${renderPassiveSection(passiveAnalysis)}
+
+    <!-- Active Findings -->
     <div class="findings-section animate-in-delay-3">
       <div class="findings-header">
-        <h3>Findings</h3>
-        <span class="findings-count">${totalFindings} total</span>
+        <h3>🎯 Active Scan Findings</h3>
+        <span class="findings-count">${activeFindings.length} finding${activeFindings.length !== 1 ? "s" : ""}</span>
       </div>
 
       ${
-        hasFindings
-          ? findings
+        activeFindings.length > 0
+          ? activeFindings
               .map(
                 (f, i) => `
         <div class="finding-card" onclick="this.classList.toggle('open')">
@@ -895,19 +1134,19 @@ export function generateHtml(data: HtmlReportData): string {
           : `
         <div class="no-findings">
           <div class="icon">🛡️</div>
-          <h3>No Vulnerabilities Detected</h3>
-          <p>${result.payloadsTested} payloads were tested across ${result.stepsExecuted} steps with no findings.</p>
+          <h3>No Active Vulnerabilities Detected</h3>
+          <p>${payloadsTested} payloads were tested across ${stepsExecuted} steps with no findings.</p>
         </div>
       `
       }
     </div>
 
     ${
-      result.errors.length > 0
+      errors.length > 0
         ? `
     <div class="errors-section">
-      <h3>⚠️ Errors During Execution (${result.errors.length})</h3>
-      ${result.errors.map((e) => `<div class="error-item">${escapeHtml(e)}</div>`).join("")}
+      <h3>⚠️ Errors During Execution (${errors.length})</h3>
+      ${errors.map((e: string) => `<div class="error-item">${escapeHtml(e)}</div>`).join("")}
     </div>
     `
         : ""

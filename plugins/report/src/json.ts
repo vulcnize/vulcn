@@ -1,24 +1,23 @@
 /**
  * JSON Report Generator for Vulcn
  *
- * Produces a structured, machine-readable JSON report.
+ * Projects the canonical VulcnReport into a clean JSON structure
+ * suitable for CI/CD pipelines and programmatic consumption.
  */
 
-import type { Finding, RunResult, Session } from "@vulcn/engine";
+import type { VulcnReport } from "./report-model";
+import { formatDuration } from "./report-model";
 
+/**
+ * The JSON output shape — a clean projection of VulcnReport.
+ */
 export interface JsonReport {
   vulcn: {
     version: string;
     reportVersion: string;
     generatedAt: string;
   };
-  session: {
-    name: string;
-    driver: string;
-    driverConfig: Record<string, unknown>;
-    stepsCount: number;
-    metadata?: Record<string, unknown>;
-  };
+  session: VulcnReport["session"];
   execution: {
     stepsExecuted: number;
     payloadsTested: number;
@@ -29,65 +28,63 @@ export interface JsonReport {
   summary: {
     totalFindings: number;
     riskScore: number;
-    severityCounts: Record<string, number>;
+    riskLabel: string;
+    severityCounts: VulcnReport["summary"]["severityCounts"];
     vulnerabilityTypes: string[];
     affectedUrls: string[];
   };
-  findings: Finding[];
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-export function generateJson(
-  session: Session,
-  result: RunResult,
-  generatedAt: string,
-  engineVersion: string,
-): JsonReport {
-  const counts: Record<string, number> = {
-    critical: 0,
-    high: 0,
-    medium: 0,
-    low: 0,
-    info: 0,
+  findings: VulcnReport["findings"];
+  passiveAnalysis: {
+    totalIssues: number;
+    categories: Array<{
+      id: string;
+      label: string;
+      status: string;
+      issueCount: number;
+      passedChecks: number;
+      totalChecks: number;
+      remedy: string;
+    }>;
   };
-  for (const f of result.findings) {
-    counts[f.severity] = (counts[f.severity] || 0) + 1;
-  }
+  rules: VulcnReport["rules"];
+}
 
-  const riskScore =
-    counts.critical * 10 + counts.high * 7 + counts.medium * 4 + counts.low * 1;
-
+export function generateJson(report: VulcnReport): JsonReport {
   return {
     vulcn: {
-      version: engineVersion,
-      reportVersion: "1.0",
-      generatedAt,
+      version: report.engineVersion,
+      reportVersion: report.reportVersion,
+      generatedAt: report.generatedAt,
     },
-    session: {
-      name: session.name,
-      driver: session.driver,
-      driverConfig: session.driverConfig,
-      stepsCount: session.steps.length,
-      metadata: session.metadata,
-    },
+    session: report.session,
     execution: {
-      stepsExecuted: result.stepsExecuted,
-      payloadsTested: result.payloadsTested,
-      durationMs: result.duration,
-      durationFormatted: formatDuration(result.duration),
-      errors: result.errors,
+      stepsExecuted: report.stats.stepsExecuted,
+      payloadsTested: report.stats.payloadsTested,
+      durationMs: report.stats.durationMs,
+      durationFormatted: formatDuration(report.stats.durationMs),
+      errors: report.stats.errors,
     },
     summary: {
-      totalFindings: result.findings.length,
-      riskScore,
-      severityCounts: counts,
-      vulnerabilityTypes: [...new Set(result.findings.map((f) => f.type))],
-      affectedUrls: [...new Set(result.findings.map((f) => f.url))],
+      totalFindings: report.summary.totalFindings,
+      riskScore: report.summary.risk.score,
+      riskLabel: report.summary.risk.label,
+      severityCounts: report.summary.severityCounts,
+      vulnerabilityTypes: report.summary.vulnerabilityTypes,
+      affectedUrls: report.summary.affectedUrls,
     },
-    findings: result.findings,
+    findings: report.findings,
+    passiveAnalysis: {
+      totalIssues: report.passiveAnalysis.totalIssues,
+      categories: report.passiveAnalysis.categories.map((c) => ({
+        id: c.definition.id,
+        label: c.definition.label,
+        status: c.status,
+        issueCount: c.issueCount,
+        passedChecks: c.passedChecks,
+        totalChecks: c.totalChecks,
+        remedy: c.definition.remedy,
+      })),
+    },
+    rules: report.rules,
   };
 }

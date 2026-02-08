@@ -1,21 +1,23 @@
 /**
  * SARIF Report Generator for Vulcn
  *
- * Produces SARIF v2.1.0 (Static Analysis Results Interchange Format)
- * compatible with GitHub Code Scanning, Azure DevOps, and other
- * SARIF-consuming tools.
+ * Projects the canonical VulcnReport into SARIF v2.1.0 (Static Analysis
+ * Results Interchange Format) compatible with GitHub Code Scanning,
+ * Azure DevOps, and other SARIF-consuming tools.
  *
  * @see https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html
  * @see https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/sarif-support-for-code-scanning
  */
 
-import type { Finding, RunResult, Session } from "@vulcn/engine";
+import type {
+  VulcnReport,
+  EnrichedFinding,
+  ReportRule,
+  Severity,
+} from "./report-model";
 
 // ── SARIF Types ────────────────────────────────────────────────────────
 
-/**
- * SARIF v2.1.0 Log — top-level structure
- */
 export interface SarifLog {
   $schema: string;
   version: "2.1.0";
@@ -102,62 +104,9 @@ interface SarifArtifact {
   length?: number;
 }
 
-// ── CWE Mappings ───────────────────────────────────────────────────────
+// ── Mapping Helpers ────────────────────────────────────────────────────
 
-/**
- * Map Vulcn vulnerability types to CWE IDs.
- * These are the most specific CWE entries for each category.
- */
-const CWE_MAP: Record<string, { id: number; name: string }> = {
-  xss: {
-    id: 79,
-    name: "Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')",
-  },
-  sqli: {
-    id: 89,
-    name: "Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')",
-  },
-  ssrf: { id: 918, name: "Server-Side Request Forgery (SSRF)" },
-  xxe: {
-    id: 611,
-    name: "Improper Restriction of XML External Entity Reference",
-  },
-  "command-injection": {
-    id: 78,
-    name: "Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')",
-  },
-  "path-traversal": {
-    id: 22,
-    name: "Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')",
-  },
-  "open-redirect": {
-    id: 601,
-    name: "URL Redirection to Untrusted Site ('Open Redirect')",
-  },
-  reflection: {
-    id: 200,
-    name: "Exposure of Sensitive Information to an Unauthorized Actor",
-  },
-  "security-misconfiguration": {
-    id: 16,
-    name: "Configuration",
-  },
-  "information-disclosure": {
-    id: 200,
-    name: "Exposure of Sensitive Information to an Unauthorized Actor",
-  },
-  custom: { id: 20, name: "Improper Input Validation" },
-};
-
-/**
- * Map Vulcn severities to SARIF levels.
- *
- * SARIF only has: error, warning, note, none
- *   - critical/high → error
- *   - medium → warning
- *   - low/info → note
- */
-function toSarifLevel(severity: Finding["severity"]): SarifLevel {
+function toSarifLevel(severity: Severity): SarifLevel {
   switch (severity) {
     case "critical":
     case "high":
@@ -172,40 +121,7 @@ function toSarifLevel(severity: Finding["severity"]): SarifLevel {
   }
 }
 
-/**
- * Map Vulcn severities to CVSS-like security-severity scores.
- * GitHub uses this for sorting in the Security tab.
- *
- * Scale: 0.0–10.0
- *   critical: 9.0
- *   high: 7.0
- *   medium: 4.0
- *   low: 2.0
- *   info: 0.0
- */
-function toSecuritySeverity(severity: Finding["severity"]): string {
-  switch (severity) {
-    case "critical":
-      return "9.0";
-    case "high":
-      return "7.0";
-    case "medium":
-      return "4.0";
-    case "low":
-      return "2.0";
-    case "info":
-      return "0.0";
-    default:
-      return "4.0";
-  }
-}
-
-/**
- * Map Vulcn severities to SARIF precision.
- */
-function toPrecision(
-  severity: Finding["severity"],
-): SarifRule["properties"]["precision"] {
+function toPrecision(severity: Severity): SarifRule["properties"]["precision"] {
   switch (severity) {
     case "critical":
       return "very-high";
@@ -221,85 +137,52 @@ function toPrecision(
   }
 }
 
-// ── Rule Generation ────────────────────────────────────────────────────
+// ── Rule & Result Projection ───────────────────────────────────────────
 
-/**
- * Generate a unique rule ID from a finding type.
- *
- * Format: VULCN-<TYPE>
- * Example: VULCN-XSS, VULCN-SQLI
- */
-function toRuleId(type: string): string {
-  return `VULCN-${type.toUpperCase().replace(/[^A-Z0-9]+/g, "-")}`;
+function toSarifRule(rule: ReportRule): SarifRule {
+  return {
+    id: rule.id,
+    name: rule.type,
+    shortDescription: {
+      text: `${rule.cwe.name} (CWE-${rule.cwe.id})`,
+    },
+    fullDescription: {
+      text: rule.description,
+    },
+    helpUri: `https://cwe.mitre.org/data/definitions/${rule.cwe.id}.html`,
+    help: {
+      text: `## ${rule.cwe.name}\n\nCWE-${rule.cwe.id}: ${rule.cwe.name}\n\nThis rule detects ${rule.type} vulnerabilities by injecting security payloads into form inputs and analyzing the application's response for signs of exploitation.\n\n### Remediation\n\nSee https://cwe.mitre.org/data/definitions/${rule.cwe.id}.html for detailed remediation guidance.`,
+      markdown: `## ${rule.cwe.name}\n\n**CWE-${rule.cwe.id}**: ${rule.cwe.name}\n\nThis rule detects \`${rule.type}\` vulnerabilities by injecting security payloads into form inputs and analyzing the application's response for signs of exploitation.\n\n### Remediation\n\nSee [CWE-${rule.cwe.id}](https://cwe.mitre.org/data/definitions/${rule.cwe.id}.html) for detailed remediation guidance.`,
+    },
+    properties: {
+      tags: [
+        "security",
+        `CWE-${rule.cwe.id}`,
+        `external/cwe/cwe-${rule.cwe.id}`,
+      ],
+      precision: toPrecision(rule.severity),
+      "security-severity": rule.securitySeverity,
+    },
+    defaultConfiguration: {
+      level: toSarifLevel(rule.severity),
+    },
+  };
 }
 
-/**
- * Build SARIF rules from unique finding types.
- * Each unique vulnerability type becomes one rule.
- */
-function buildRules(findings: Finding[]): SarifRule[] {
-  const seenTypes = new Map<string, Finding>();
+function toSarifResult(
+  finding: EnrichedFinding,
+  sarifRules: SarifRule[],
+): SarifResult {
+  const ruleIndex = sarifRules.findIndex((r) => r.id === finding.ruleId);
 
-  for (const f of findings) {
-    if (!seenTypes.has(f.type)) {
-      seenTypes.set(f.type, f);
-    }
-  }
-
-  return Array.from(seenTypes.entries()).map(([type, sampleFinding]) => {
-    const cwe = CWE_MAP[type] || CWE_MAP.custom;
-    const ruleId = toRuleId(type);
-
-    return {
-      id: ruleId,
-      name: type,
-      shortDescription: {
-        text: `${cwe.name} (CWE-${cwe.id})`,
-      },
-      fullDescription: {
-        text: `Vulcn detected a potential ${type} vulnerability. ${cwe.name}. See CWE-${cwe.id} for details.`,
-      },
-      helpUri: `https://cwe.mitre.org/data/definitions/${cwe.id}.html`,
-      help: {
-        text: `## ${cwe.name}\n\nCWE-${cwe.id}: ${cwe.name}\n\nThis rule detects ${type} vulnerabilities by injecting security payloads into form inputs and analyzing the application's response for signs of exploitation.\n\n### Remediation\n\nSee https://cwe.mitre.org/data/definitions/${cwe.id}.html for detailed remediation guidance.`,
-        markdown: `## ${cwe.name}\n\n**CWE-${cwe.id}**: ${cwe.name}\n\nThis rule detects \`${type}\` vulnerabilities by injecting security payloads into form inputs and analyzing the application's response for signs of exploitation.\n\n### Remediation\n\nSee [CWE-${cwe.id}](https://cwe.mitre.org/data/definitions/${cwe.id}.html) for detailed remediation guidance.`,
-      },
-      properties: {
-        tags: ["security", `CWE-${cwe.id}`, `external/cwe/cwe-${cwe.id}`],
-        precision: toPrecision(sampleFinding.severity),
-        "security-severity": toSecuritySeverity(sampleFinding.severity),
-      },
-      defaultConfiguration: {
-        level: toSarifLevel(sampleFinding.severity),
-      },
-    };
-  });
-}
-
-// ── Result Generation ──────────────────────────────────────────────────
-
-/**
- * Convert a Vulcn Finding to a SARIF Result.
- */
-function toSarifResult(finding: Finding, rules: SarifRule[]): SarifResult {
-  const ruleId = toRuleId(finding.type);
-  const ruleIndex = rules.findIndex((r) => r.id === ruleId);
-
-  // Build message with evidence if available
   let messageText = `${finding.title}\n\n${finding.description}`;
   if (finding.evidence) {
     messageText += `\n\nEvidence: ${finding.evidence}`;
   }
   messageText += `\n\nPayload: ${finding.payload}`;
 
-  // Build location from URL
-  const uri = finding.url || "unknown";
-
-  // Generate fingerprint from finding properties
-  const fingerprint = `${finding.type}:${finding.stepId}:${finding.payload.slice(0, 50)}`;
-
   return {
-    ruleId,
+    ruleId: finding.ruleId,
     ruleIndex: Math.max(ruleIndex, 0),
     level: toSarifLevel(finding.severity),
     message: { text: messageText },
@@ -307,7 +190,7 @@ function toSarifResult(finding: Finding, rules: SarifRule[]): SarifResult {
       {
         physicalLocation: {
           artifactLocation: {
-            uri,
+            uri: finding.url || "unknown",
           },
           region: {
             startLine: 1,
@@ -322,7 +205,7 @@ function toSarifResult(finding: Finding, rules: SarifRule[]): SarifResult {
       },
     ],
     fingerprints: {
-      vulcnFindingV1: fingerprint,
+      vulcnFindingV1: finding.fingerprint,
     },
     partialFingerprints: {
       vulcnType: finding.type,
@@ -332,8 +215,11 @@ function toSarifResult(finding: Finding, rules: SarifRule[]): SarifResult {
       severity: finding.severity,
       payload: finding.payload,
       stepId: finding.stepId,
+      detectionMethod: finding.detectionMethod,
       ...(finding.evidence ? { evidence: finding.evidence } : {}),
-      ...(finding.metadata || {}),
+      ...(finding.passiveCategory
+        ? { passiveCategory: finding.passiveCategory }
+        : {}),
     },
   };
 }
@@ -341,44 +227,27 @@ function toSarifResult(finding: Finding, rules: SarifRule[]): SarifResult {
 // ── Public API ─────────────────────────────────────────────────────────
 
 /**
- * Generate a SARIF v2.1.0 log from Vulcn scan results.
+ * Generate a SARIF v2.1.0 log from a VulcnReport.
  *
  * Usage:
- *   const sarif = generateSarif(session, result, generatedAt, "0.4.0");
+ *   const report = buildReport(session, result, generatedAt, "0.5.0");
+ *   const sarif = generateSarif(report);
  *   await writeFile("vulcn-report.sarif", JSON.stringify(sarif, null, 2));
- *
- * The output can be uploaded to:
- *   - GitHub Code Scanning: `gh api /repos/{owner}/{repo}/code-scanning/sarifs`
- *   - GitHub Actions: `github/codeql-action/upload-sarif@v3`
- *   - Azure DevOps: SARIF SAST Scans Tab extension
- *
- * @param session  - The session that was executed
- * @param result   - The run result with findings
- * @param generatedAt - ISO timestamp
- * @param engineVersion - Vulcn engine version
  */
-export function generateSarif(
-  session: Session,
-  result: RunResult,
-  generatedAt: string,
-  engineVersion: string,
-): SarifLog {
-  const rules = buildRules(result.findings);
-  const results = result.findings.map((f) => toSarifResult(f, rules));
+export function generateSarif(report: VulcnReport): SarifLog {
+  const sarifRules = report.rules.map(toSarifRule);
+  const results = report.findings.map((f) => toSarifResult(f, sarifRules));
 
   // Build artifact list from unique URLs
-  const uniqueUrls = [
-    ...new Set(result.findings.map((f) => f.url).filter(Boolean)),
-  ];
-  const artifacts: SarifArtifact[] = uniqueUrls.map((url) => ({
+  const artifacts: SarifArtifact[] = report.summary.affectedUrls.map((url) => ({
     location: { uri: url },
   }));
 
   // Calculate end time from duration
-  const startDate = new Date(generatedAt);
-  const endDate = new Date(startDate.getTime() + result.duration);
+  const startDate = new Date(report.generatedAt);
+  const endDate = new Date(startDate.getTime() + report.stats.durationMs);
 
-  const sarifLog: SarifLog = {
+  return {
     $schema:
       "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
     version: "2.1.0",
@@ -387,24 +256,26 @@ export function generateSarif(
         tool: {
           driver: {
             name: "Vulcn",
-            version: engineVersion,
-            semanticVersion: engineVersion,
+            version: report.engineVersion,
+            semanticVersion: report.engineVersion,
             informationUri: "https://vulcn.dev",
-            rules,
+            rules: sarifRules,
           },
         },
         results,
         invocations: [
           {
-            executionSuccessful: result.errors.length === 0,
-            startTimeUtc: generatedAt,
+            executionSuccessful: report.stats.errors.length === 0,
+            startTimeUtc: report.generatedAt,
             endTimeUtc: endDate.toISOString(),
             properties: {
-              sessionName: session.name,
-              stepsExecuted: result.stepsExecuted,
-              payloadsTested: result.payloadsTested,
-              durationMs: result.duration,
-              ...(result.errors.length > 0 ? { errors: result.errors } : {}),
+              sessionName: report.session.name,
+              stepsExecuted: report.stats.stepsExecuted,
+              payloadsTested: report.stats.payloadsTested,
+              durationMs: report.stats.durationMs,
+              ...(report.stats.errors.length > 0
+                ? { errors: report.stats.errors }
+                : {}),
             },
           },
         ],
@@ -412,6 +283,4 @@ export function generateSarif(
       },
     ],
   };
-
-  return sarifLog;
 }
