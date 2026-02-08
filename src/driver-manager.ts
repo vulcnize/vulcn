@@ -232,6 +232,8 @@ export class DriverManager {
   /**
    * Execute a session
    * Invokes plugin hooks (onRunStart, onRunEnd) around the driver runner.
+   * Plugin onRunStart is deferred until the driver signals the page is ready
+   * via the onPageReady callback, ensuring plugins get a real page object.
    */
   async execute(
     session: Session,
@@ -242,21 +244,16 @@ export class DriverManager {
     const findings: Finding[] = [];
     const logger = this.createLogger(driver.name);
 
-    const ctx: RunContext = {
-      session,
-      pluginManager,
-      payloads: pluginManager.getPayloads(),
-      findings,
-      addFinding: (finding) => {
-        findings.push(finding);
-        pluginManager.addFinding(finding);
-        options.onFinding?.(finding);
-      },
-      logger,
-      options,
+    // Shared addFinding function — used by both internal RunContext and
+    // plugin context. Ensures all findings (active + passive) flow through
+    // the onFinding callback so consumers get notified consistently.
+    const addFinding = (finding: Finding) => {
+      findings.push(finding);
+      pluginManager.addFinding(finding);
+      options.onFinding?.(finding);
     };
 
-    // Build a plugin context for hooks
+    // Build a plugin context template for hooks (page is set in onPageReady)
     const pluginCtx = {
       session,
       page: null as unknown,
@@ -265,25 +262,62 @@ export class DriverManager {
       engine: { version: "0.3.0", pluginApiVersion: 1 },
       payloads: pluginManager.getPayloads(),
       findings,
+      addFinding,
       logger,
       fetch: globalThis.fetch,
     };
 
-    // Call onRunStart hooks
-    for (const loaded of pluginManager.getPlugins()) {
-      if (loaded.enabled && loaded.plugin.hooks?.onRunStart) {
-        try {
-          await loaded.plugin.hooks.onRunStart({
-            ...pluginCtx,
-            config: loaded.config,
-          });
-        } catch (err) {
-          logger.warn(`Plugin ${loaded.plugin.name} onRunStart failed: ${err}`);
-        }
-      }
-    }
+    const ctx: RunContext = {
+      session,
+      pluginManager,
+      payloads: pluginManager.getPayloads(),
+      findings,
+      addFinding,
+      logger,
+      options: {
+        ...options,
+        // Provide onPageReady callback — fires plugin onRunStart hooks
+        // with the real page object once the driver has created it
+        onPageReady: async (page: unknown) => {
+          pluginCtx.page = page;
+
+          for (const loaded of pluginManager.getPlugins()) {
+            if (loaded.enabled && loaded.plugin.hooks?.onRunStart) {
+              try {
+                await loaded.plugin.hooks.onRunStart({
+                  ...pluginCtx,
+                  config: loaded.config,
+                });
+              } catch (err) {
+                logger.warn(
+                  `Plugin ${loaded.plugin.name} onRunStart failed: ${err}`,
+                );
+              }
+            }
+          }
+        },
+        // Fires before browser closes — lets plugins flush pending async work
+        onBeforeClose: async (_page: unknown) => {
+          for (const loaded of pluginManager.getPlugins()) {
+            if (loaded.enabled && loaded.plugin.hooks?.onBeforeClose) {
+              try {
+                await loaded.plugin.hooks.onBeforeClose({
+                  ...pluginCtx,
+                  config: loaded.config,
+                });
+              } catch (err) {
+                logger.warn(
+                  `Plugin ${loaded.plugin.name} onBeforeClose failed: ${err}`,
+                );
+              }
+            }
+          }
+        },
+      },
+    };
 
     // Execute via driver runner
+    // (runner calls ctx.options.onPageReady(page) after creating the page)
     let result = await driver.runner.execute(session, ctx);
 
     // Call onRunEnd hooks (e.g., report generation)

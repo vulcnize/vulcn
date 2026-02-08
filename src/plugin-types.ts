@@ -117,6 +117,13 @@ export interface PluginHooks {
   /** Called after payload injection, for detection */
   onAfterPayload?: (ctx: DetectContext) => Promise<Finding[]>;
 
+  /**
+   * Called before the browser/driver is closed.
+   * Plugins should await any pending async work here (e.g., flush
+   * in-flight response handlers that need browser access).
+   */
+  onBeforeClose?: (ctx: PluginContext) => Promise<void>;
+
   /** Called when run ends, can transform results */
   onRunEnd?: (result: RunResult, ctx: RunContext) => Promise<RunResult>;
 
@@ -181,8 +188,15 @@ export interface PluginContext {
   /** Shared payload registry - loaders add payloads here */
   payloads: RuntimePayload[];
 
-  /** Shared findings collection - detectors add findings here */
+  /** Shared findings collection (read-only view, use addFinding to add) */
   findings: Finding[];
+
+  /**
+   * Add a finding through the proper callback chain.
+   * Plugins should use this instead of pushing to findings[] directly,
+   * so consumers (CLI, worker) get notified via onFinding callbacks.
+   */
+  addFinding: (finding: Finding) => void;
 
   /** Scoped logger */
   logger: PluginLogger;

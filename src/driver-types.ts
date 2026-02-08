@@ -151,6 +151,20 @@ export interface RunOptions {
   /** Callback for step completion */
   onStepComplete?: (stepId: string, payloadCount: number) => void;
 
+  /**
+   * Called by the driver runner after the page/environment is ready.
+   * The driver-manager uses this to fire plugin onRunStart hooks
+   * with the real page object (instead of null).
+   */
+  onPageReady?: (page: unknown) => Promise<void>;
+
+  /**
+   * Called by the driver runner before closing the browser/environment.
+   * The driver-manager uses this to fire plugin onBeforeClose hooks
+   * so plugins can flush pending async work.
+   */
+  onBeforeClose?: (page: unknown) => Promise<void>;
+
   /** Driver-specific options */
   [key: string]: unknown;
 }

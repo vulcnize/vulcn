@@ -369,6 +369,55 @@ async function discoverForms(
 
 // ── Link Discovery ─────────────────────────────────────────────────────
 
+/** Query parameter names commonly used for external redirects */
+const REDIRECT_PARAMS = new Set([
+  "to",
+  "url",
+  "redirect",
+  "redirect_uri",
+  "redirect_url",
+  "return",
+  "return_url",
+  "returnto",
+  "next",
+  "goto",
+  "dest",
+  "destination",
+  "continue",
+  "target",
+  "rurl",
+  "out",
+  "link",
+  "forward",
+]);
+
+/**
+ * Check if a link is a same-origin redirect that points to an external URL.
+ * Example: /redirect?to=https://github.com/...
+ */
+function isExternalRedirectLink(link: string, origin: string): boolean {
+  try {
+    const parsed = new URL(link);
+    // Only check links on our origin
+    if (parsed.origin !== origin) return false;
+
+    for (const [key, value] of parsed.searchParams) {
+      if (REDIRECT_PARAMS.has(key.toLowerCase())) {
+        // If the param value looks like an external URL, skip this link
+        try {
+          const targetUrl = new URL(value);
+          if (targetUrl.origin !== origin) return true;
+        } catch {
+          // Not a URL — that's fine
+        }
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 async function discoverLinks(
   page: Page,
   origin: string,
@@ -380,17 +429,18 @@ async function discoverLinks(
       .filter((href) => href.startsWith("http"));
   });
 
-  if (sameOrigin) {
-    return links.filter((link) => {
-      try {
-        return new URL(link).origin === origin;
-      } catch {
-        return false;
-      }
-    });
-  }
-
-  return links;
+  return links.filter((link) => {
+    try {
+      const linkOrigin = new URL(link).origin;
+      // Filter out links to different origins
+      if (sameOrigin && linkOrigin !== origin) return false;
+      // Filter out redirect links that point to external URLs
+      if (isExternalRedirectLink(link, origin)) return false;
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 // ── Session Builder ────────────────────────────────────────────────────

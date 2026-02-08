@@ -398,6 +398,13 @@ const reportedFindings = new Set<string>();
  */
 const analyzedUrls = new Set<string>();
 
+/**
+ * Track in-flight async response handlers.
+ * These need to be drained (via onBeforeClose) before the browser shuts down,
+ * because they call response.allHeaders() which requires an open connection.
+ */
+const pendingHandlers: Promise<void>[] = [];
+
 // ── Utility ────────────────────────────────────────────────────────────
 
 /**
@@ -494,231 +501,261 @@ const plugin: VulcnPlugin = {
       const config = configSchema.parse(ctx.config);
       const page = ctx.page as Page;
 
-      // Clear state from previous runs
-      reportedFindings.clear();
+      if (!page || typeof page.on !== "function") {
+        ctx.logger.warn("Passive scanner skipped — page is not available");
+        return;
+      }
+
+      // Clear per-session state. analyzedUrls must be fresh because each
+      // session navigates to different pages. pendingHandlers is per-page.
+      // reportedFindings is intentionally NOT cleared — it deduplicates
+      // passive findings across sessions (e.g., "Missing CSP" on the same
+      // origin should be reported once, not once per crawled form).
       analyzedUrls.clear();
+      pendingHandlers.length = 0;
 
-      // Listen for all network responses
-      page.on("response", async (response: PlaywrightResponse) => {
-        try {
-          const url = response.url();
-          const status = response.status();
+      // Listen for all network responses.
+      // We track each async handler so onBeforeClose can await them
+      // before the browser shuts down (response.allHeaders() needs browser alive).
+      page.on("response", (response: PlaywrightResponse) => {
+        const promise = (async () => {
+          try {
+            const url = response.url();
+            const status = response.status();
 
-          // Skip already-analyzed URLs, redirects, and static assets
-          if (analyzedUrls.has(url)) return;
-          if (status >= 300 && status < 400) return;
-          if (isStaticAsset(url)) return;
+            // Skip already-analyzed URLs, redirects, and static assets
+            if (analyzedUrls.has(url)) return;
+            if (status >= 300 && status < 400) return;
+            if (isStaticAsset(url)) return;
 
-          analyzedUrls.add(url);
+            analyzedUrls.add(url);
 
-          // Collect headers (case-insensitive map)
-          const allHeaders = await response.allHeaders();
-          const headers = new Map<string, string>();
-          for (const [key, value] of Object.entries(allHeaders)) {
-            headers.set(key.toLowerCase(), value);
-          }
+            // Collect headers (case-insensitive map)
+            const allHeaders = await response.allHeaders();
+            const headers = new Map<string, string>();
+            for (const [key, value] of Object.entries(allHeaders)) {
+              headers.set(key.toLowerCase(), value);
+            }
 
-          const contentType = headers.get("content-type") ?? null;
-          const isHttps = url.startsWith("https://");
-          const isHtml = isHtmlResponse(contentType);
-          const origin = getOrigin(url);
+            const contentType = headers.get("content-type") ?? null;
+            const isHttps = url.startsWith("https://");
+            const isHtml = isHtmlResponse(contentType);
+            const origin = getOrigin(url);
 
-          // ── 1. Security Headers (HTML responses only) ──────────────
-          if (config.detectHeaders && isHtml) {
-            for (const check of SECURITY_HEADERS) {
-              const value = headers.get(check.header);
+            // ── 1. Security Headers (HTML responses only) ──────────────
+            if (config.detectHeaders && isHtml) {
+              for (const check of SECURITY_HEADERS) {
+                const value = headers.get(check.header);
 
-              if (!value) {
-                // Header is missing entirely
-                const key = findingKey("header-missing", origin, check.header);
-                if (!reportedFindings.has(key)) {
-                  reportedFindings.add(key);
-                  ctx.findings.push({
-                    type: "security-misconfiguration",
-                    severity: config.headerSeverity,
-                    title: check.title,
-                    description: check.description,
-                    stepId: "passive-scan",
-                    payload: "",
-                    url,
-                    evidence: `Missing header: ${check.header}`,
-                    metadata: {
-                      detectionMethod: "passive",
-                      category: "security-headers",
-                      cwe: check.cwe,
-                      header: check.header,
-                    },
-                  });
-                }
-              } else if (check.validateValue) {
-                // Header is present but may have a weak value
-                const issue = check.validateValue(value);
-                if (issue) {
-                  const key = findingKey("header-weak", origin, issue);
+                if (!value) {
+                  // Header is missing entirely
+                  const key = findingKey(
+                    "header-missing",
+                    origin,
+                    check.header,
+                  );
                   if (!reportedFindings.has(key)) {
                     reportedFindings.add(key);
-                    ctx.findings.push({
+                    ctx.addFinding({
                       type: "security-misconfiguration",
                       severity: config.headerSeverity,
-                      title: `Weak ${check.header}`,
-                      description: issue,
+                      title: check.title,
+                      description: check.description,
                       stepId: "passive-scan",
                       payload: "",
                       url,
-                      evidence: `${check.header}: ${value}`,
+                      evidence: `Missing header: ${check.header}`,
                       metadata: {
                         detectionMethod: "passive",
                         category: "security-headers",
                         cwe: check.cwe,
                         header: check.header,
-                        headerValue: value,
+                      },
+                    });
+                  }
+                } else if (check.validateValue) {
+                  // Header is present but may have a weak value
+                  const issue = check.validateValue(value);
+                  if (issue) {
+                    const key = findingKey("header-weak", origin, issue);
+                    if (!reportedFindings.has(key)) {
+                      reportedFindings.add(key);
+                      ctx.addFinding({
+                        type: "security-misconfiguration",
+                        severity: config.headerSeverity,
+                        title: `Weak ${check.header}`,
+                        description: issue,
+                        stepId: "passive-scan",
+                        payload: "",
+                        url,
+                        evidence: `${check.header}: ${value}`,
+                        metadata: {
+                          detectionMethod: "passive",
+                          category: "security-headers",
+                          cwe: check.cwe,
+                          header: check.header,
+                          headerValue: value,
+                        },
+                      });
+                    }
+                  }
+                }
+              }
+            }
+
+            // ── 2. Cookie Security ─────────────────────────────────────
+            if (config.detectCookies) {
+              const setCookie = headers.get("set-cookie");
+              if (setCookie) {
+                // Split multiple Set-Cookie headers (they may be joined)
+                const cookies = setCookie.split(/,(?=\s*\w+=)/);
+                const issues = checkCookieSecurity(cookies, isHttps);
+
+                for (const issue of issues) {
+                  const key = findingKey(
+                    "cookie",
+                    origin,
+                    `${issue.cookie}:${issue.issue}`,
+                  );
+                  if (!reportedFindings.has(key)) {
+                    reportedFindings.add(key);
+                    ctx.addFinding({
+                      type: "security-misconfiguration",
+                      severity: config.cookieSeverity,
+                      title: `Cookie: ${issue.issue} — ${issue.cookie}`,
+                      description: issue.description,
+                      stepId: "passive-scan",
+                      payload: "",
+                      url,
+                      evidence: `Set-Cookie: ${issue.cookie}=... (${issue.issue})`,
+                      metadata: {
+                        detectionMethod: "passive",
+                        category: "cookie-security",
+                        cwe: "CWE-614",
+                        cookieName: issue.cookie,
+                        issue: issue.issue,
                       },
                     });
                   }
                 }
               }
             }
-          }
 
-          // ── 2. Cookie Security ─────────────────────────────────────
-          if (config.detectCookies) {
-            const setCookie = headers.get("set-cookie");
-            if (setCookie) {
-              // Split multiple Set-Cookie headers (they may be joined)
-              const cookies = setCookie.split(/,(?=\s*\w+=)/);
-              const issues = checkCookieSecurity(cookies, isHttps);
+            // ── 3. Information Disclosure ───────────────────────────────
+            if (config.detectInfoLeak) {
+              for (const leak of INFO_LEAK_HEADERS) {
+                const value = headers.get(leak.header);
+                if (!value) continue;
 
-              for (const issue of issues) {
-                const key = findingKey(
-                  "cookie",
-                  origin,
-                  `${issue.cookie}:${issue.issue}`,
-                );
+                // If there's a pattern, only flag if it matches
+                if (leak.pattern && !leak.pattern.test(value)) continue;
+
+                const key = findingKey("info-leak", origin, leak.header);
                 if (!reportedFindings.has(key)) {
                   reportedFindings.add(key);
-                  ctx.findings.push({
-                    type: "security-misconfiguration",
-                    severity: config.cookieSeverity,
-                    title: `Cookie: ${issue.issue} — ${issue.cookie}`,
-                    description: issue.description,
+                  ctx.addFinding({
+                    type: "information-disclosure",
+                    severity: config.infoLeakSeverity,
+                    title: leak.title,
+                    description: leak.description,
                     stepId: "passive-scan",
                     payload: "",
                     url,
-                    evidence: `Set-Cookie: ${issue.cookie}=... (${issue.issue})`,
+                    evidence: `${leak.header}: ${value}`,
                     metadata: {
                       detectionMethod: "passive",
-                      category: "cookie-security",
-                      cwe: "CWE-614",
-                      cookieName: issue.cookie,
-                      issue: issue.issue,
+                      category: "information-disclosure",
+                      cwe: "CWE-200",
+                      header: leak.header,
+                      headerValue: value,
                     },
                   });
                 }
               }
             }
-          }
 
-          // ── 3. Information Disclosure ───────────────────────────────
-          if (config.detectInfoLeak) {
-            for (const leak of INFO_LEAK_HEADERS) {
-              const value = headers.get(leak.header);
-              if (!value) continue;
+            // ── 4. CORS Misconfiguration ───────────────────────────────
+            if (config.detectCors) {
+              const corsIssues = checkCors(headers);
+              for (const issue of corsIssues) {
+                const key = findingKey("cors", origin, issue.title);
+                if (!reportedFindings.has(key)) {
+                  reportedFindings.add(key);
 
-              // If there's a pattern, only flag if it matches
-              if (leak.pattern && !leak.pattern.test(value)) continue;
+                  // Wildcard + credentials is critical
+                  const severity = issue.title.includes("credentials")
+                    ? "critical"
+                    : config.corsSeverity;
 
-              const key = findingKey("info-leak", origin, leak.header);
-              if (!reportedFindings.has(key)) {
-                reportedFindings.add(key);
-                ctx.findings.push({
-                  type: "information-disclosure",
-                  severity: config.infoLeakSeverity,
-                  title: leak.title,
-                  description: leak.description,
-                  stepId: "passive-scan",
-                  payload: "",
-                  url,
-                  evidence: `${leak.header}: ${value}`,
-                  metadata: {
-                    detectionMethod: "passive",
-                    category: "information-disclosure",
-                    cwe: "CWE-200",
-                    header: leak.header,
-                    headerValue: value,
-                  },
-                });
+                  ctx.addFinding({
+                    type: "security-misconfiguration",
+                    severity,
+                    title: issue.title,
+                    description: issue.description,
+                    stepId: "passive-scan",
+                    payload: "",
+                    url,
+                    evidence: issue.evidence,
+                    metadata: {
+                      detectionMethod: "passive",
+                      category: "cors",
+                      cwe: "CWE-942",
+                    },
+                  });
+                }
               }
             }
-          }
 
-          // ── 4. CORS Misconfiguration ───────────────────────────────
-          if (config.detectCors) {
-            const corsIssues = checkCors(headers);
-            for (const issue of corsIssues) {
-              const key = findingKey("cors", origin, issue.title);
-              if (!reportedFindings.has(key)) {
-                reportedFindings.add(key);
-
-                // Wildcard + credentials is critical
-                const severity = issue.title.includes("credentials")
-                  ? "critical"
-                  : config.corsSeverity;
-
-                ctx.findings.push({
-                  type: "security-misconfiguration",
-                  severity,
-                  title: issue.title,
-                  description: issue.description,
-                  stepId: "passive-scan",
-                  payload: "",
-                  url,
-                  evidence: issue.evidence,
-                  metadata: {
-                    detectionMethod: "passive",
-                    category: "cors",
-                    cwe: "CWE-942",
-                  },
-                });
+            // ── 5. Mixed Content ───────────────────────────────────────
+            if (config.detectMixed && isHttps) {
+              // Check if this HTTPS page loaded any HTTP resources
+              // We detect this by checking if the response itself is HTTP on an HTTPS page
+              // (the response listener sees all sub-resources too)
+              if (
+                url.startsWith("http://") &&
+                !url.startsWith("http://localhost")
+              ) {
+                const key = findingKey("mixed-content", url, "http-resource");
+                if (!reportedFindings.has(key)) {
+                  reportedFindings.add(key);
+                  ctx.addFinding({
+                    type: "security-misconfiguration",
+                    severity: config.mixedContentSeverity,
+                    title: "Mixed Content: HTTP resource on HTTPS page",
+                    description: `An HTTPS page loaded a resource over insecure HTTP. This allows attackers to intercept or modify the resource via man-in-the-middle attacks, potentially compromising the entire page.`,
+                    stepId: "passive-scan",
+                    payload: "",
+                    url,
+                    evidence: `HTTP resource: ${url}`,
+                    metadata: {
+                      detectionMethod: "passive",
+                      category: "mixed-content",
+                      cwe: "CWE-311",
+                    },
+                  });
+                }
               }
             }
+          } catch {
+            // Response analysis failed — skip silently
           }
-
-          // ── 5. Mixed Content ───────────────────────────────────────
-          if (config.detectMixed && isHttps) {
-            // Check if this HTTPS page loaded any HTTP resources
-            // We detect this by checking if the response itself is HTTP on an HTTPS page
-            // (the response listener sees all sub-resources too)
-            if (
-              url.startsWith("http://") &&
-              !url.startsWith("http://localhost")
-            ) {
-              const key = findingKey("mixed-content", url, "http-resource");
-              if (!reportedFindings.has(key)) {
-                reportedFindings.add(key);
-                ctx.findings.push({
-                  type: "security-misconfiguration",
-                  severity: config.mixedContentSeverity,
-                  title: "Mixed Content: HTTP resource on HTTPS page",
-                  description: `An HTTPS page loaded a resource over insecure HTTP. This allows attackers to intercept or modify the resource via man-in-the-middle attacks, potentially compromising the entire page.`,
-                  stepId: "passive-scan",
-                  payload: "",
-                  url,
-                  evidence: `HTTP resource: ${url}`,
-                  metadata: {
-                    detectionMethod: "passive",
-                    category: "mixed-content",
-                    cwe: "CWE-311",
-                  },
-                });
-              }
-            }
-          }
-        } catch {
-          // Response analysis failed — skip silently
-        }
+        })();
+        pendingHandlers.push(promise);
       });
 
       ctx.logger.info("🔍 Passive scanner listening for network responses...");
+    },
+
+    /**
+     * Drain pending async response handlers before browser closes.
+     * Without this, response.allHeaders() calls would fail because
+     * the browser connection would already be torn down.
+     */
+    onBeforeClose: async () => {
+      if (pendingHandlers.length > 0) {
+        await Promise.allSettled(pendingHandlers);
+        pendingHandlers.length = 0;
+      }
     },
 
     onRunEnd: async (_result, ctx: PluginRunContext) => {

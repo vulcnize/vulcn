@@ -61,6 +61,10 @@ export class BrowserRunner {
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();
 
+    // Signal that the page is ready — plugins (e.g. passive scanner)
+    // can now attach event listeners to the real page object
+    await ctx.options.onPageReady?.(page);
+
     // Event findings from dialog/console handlers
     const eventFindings: Finding[] = [];
     let currentPayloadInfo: {
@@ -143,17 +147,37 @@ export class BrowserRunner {
             false,
       );
 
-      // Build flat list of all individual payloads to test
+      // Build flat list of payloads, interleaved by category (round-robin).
+      // This ensures we test at least one payload from each category quickly,
+      // so the dedup early-break fires sooner on slow SPAs like Angular apps.
+      // Before: [sqli1, sqli2, ..., sqli50, xss1, xss2, ..., xss50]
+      // After:  [sqli1, xss1, sqli2, xss2, ..., sqli50, xss50]
       const allPayloads: { payloadSet: RuntimePayload; value: string }[] = [];
-      for (const payloadSet of payloads) {
-        for (const value of payloadSet.payloads) {
-          allPayloads.push({ payloadSet, value });
+      const payloadsByCategory = payloads.map((ps) =>
+        ps.payloads.map((value) => ({ payloadSet: ps, value })),
+      );
+      const maxLen = Math.max(...payloadsByCategory.map((c) => c.length));
+      for (let i = 0; i < maxLen; i++) {
+        for (const category of payloadsByCategory) {
+          if (i < category.length) {
+            allPayloads.push(category[i]);
+          }
         }
       }
+
+      // Track confirmed vulnerability types per-step to avoid duplicate findings.
+      // Once XSS is confirmed on an input (e.g., via dialog), skip remaining XSS payloads.
+      const confirmedTypes = new Set<string>();
 
       // For each injectable step, test with each payload
       for (const injectableStep of injectableSteps) {
         for (const { payloadSet, value } of allPayloads) {
+          // Skip if this vulnerability type is already confirmed for this step
+          const stepTypeKey = `${injectableStep.id}::${payloadSet.category}`;
+          if (confirmedTypes.has(stepTypeKey)) {
+            continue;
+          }
+
           try {
             currentPayloadInfo = {
               stepId: injectableStep.id,
@@ -178,15 +202,27 @@ export class BrowserRunner {
               value,
             );
 
-            // Collect all findings
+            // Collect all findings from this payload
             const allFindings = [...eventFindings];
             if (reflectionFinding) {
               allFindings.push(reflectionFinding);
             }
 
-            // Add unique findings
+            // Deduplicate: only add findings we haven't already reported
+            const seenKeys = new Set<string>();
             for (const finding of allFindings) {
-              ctx.addFinding(finding);
+              const dedupKey = `${finding.type}::${finding.stepId}::${finding.title}`;
+              if (!seenKeys.has(dedupKey)) {
+                seenKeys.add(dedupKey);
+                ctx.addFinding(finding);
+              }
+            }
+
+            // If we got any finding (dialog, console, or reflection), mark as confirmed
+            // and skip remaining payloads of this category for this input.
+            // One confirmed finding is enough evidence — no need to test more payloads.
+            if (allFindings.length > 0) {
+              confirmedTypes.add(stepTypeKey);
             }
 
             // Clear event findings for next iteration
@@ -204,6 +240,11 @@ export class BrowserRunner {
       page.off("dialog", dialogHandler);
       page.off("console", consoleHandler);
       currentPayloadInfo = null;
+
+      // Let plugins flush pending async work before browser closes
+      // (e.g., passive scanner's in-flight response header analysis)
+      await ctx.options.onBeforeClose?.(page);
+
       await browser.close();
     }
 
