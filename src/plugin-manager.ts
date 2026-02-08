@@ -305,6 +305,9 @@ export class PluginManager {
       engine: engineInfo,
       payloads: this.sharedPayloads,
       findings: this.sharedFindings,
+      addFinding: (finding: Finding) => {
+        this.sharedFindings.push(finding);
+      },
       logger: this.createLogger("plugin"),
       fetch: globalThis.fetch,
     };
