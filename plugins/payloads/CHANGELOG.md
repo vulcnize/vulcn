@@ -1,5 +1,12 @@
 # @vulcn/plugin-payloads
 
+## 1.0.0
+
+### Patch Changes
+
+- Updated dependencies [56eb043]
+  - @vulcn/engine@0.5.0
+
 ## 0.3.0
 
 ### Minor Changes
