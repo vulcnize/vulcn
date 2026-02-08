@@ -84,7 +84,7 @@
     "@vulcn/plugin-detect-sqli": "workspace:*",
     "@vulcn/plugin-report": "workspace:*",
     "@vulcn/plugin-passive": "workspace:*",
-    "commander": "^13.1.0",
+    "commander": "^14.0.3",
     "chalk": "^5.4.0",
     "ora": "^8.2.0",
     "yaml": "^2.7.0"
