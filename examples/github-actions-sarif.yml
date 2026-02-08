@@ -1,0 +1,88 @@
+# Vulcn Security Scan — GitHub Actions
+#
+# Runs Vulcn security tests on every push/PR and uploads
+# SARIF results to GitHub Code Scanning.
+#
+# Requirements:
+#   - A recorded session file committed to the repo
+#   - @vulcn/cli installed as a dev dependency
+#
+# Usage:
+#   1. Copy this file to .github/workflows/vulcn.yml
+#   2. Record a session: npx vulcn record https://your-staging-app.com
+#   3. Commit the .vulcn.yml session file
+#   4. Push — Vulcn findings will appear in Security → Code Scanning
+#
+name: Vulcn Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly scan on Monday at 6am UTC
+    - cron: "0 6 * * 1"
+
+permissions:
+  # Required for uploading SARIF to GitHub Code Scanning
+  security-events: write
+  contents: read
+
+jobs:
+  vulcn-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Vulcn CLI
+        run: npm install -g @vulcn/cli
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      # Option 1: Run against a recorded session
+      - name: Run Vulcn scan
+        run: |
+          vulcn run session.vulcn.yml \
+            -p xss sqli \
+            -r sarif \
+            --report-output . \
+            --headless
+        env:
+          # If your staging app needs auth
+          # VULCN_TARGET_URL: ${{ secrets.STAGING_URL }}
+          CI: true
+
+      # Option 2: Auto-crawl and scan (no session file needed)
+      # - name: Crawl and scan
+      #   run: |
+      #     vulcn crawl ${{ secrets.STAGING_URL }} \
+      #       --depth 2 \
+      #       --max-pages 10 \
+      #       --run-after xss sqli \
+      #       --output ./sessions
+
+      - name: Upload SARIF to GitHub
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() # Upload even if scan found vulnerabilities
+        with:
+          sarif_file: vulcn-report.sarif
+          category: vulcn-dast
+
+      # Optional: Upload HTML report as artifact
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vulcn-security-report
+          path: vulcn-report.html
+          retention-days: 30

@@ -138,8 +138,15 @@ program
   .option("-b, --browser <browser>", "Browser to use", "chromium")
   .option("--headless", "Run in headless mode", true)
   .option("--no-headless", "Run with visible browser")
-  .option("-r, --report <format>", "Generate report (html, json, yaml, all)")
+  .option(
+    "-r, --report <format>",
+    "Generate report (html, json, yaml, sarif, all)",
+  )
   .option("--report-output <dir>", "Output directory for reports", ".")
+  .option(
+    "--passive",
+    "Enable passive security scanner (headers, cookies, info-disclosure)",
+  )
   .addHelpText(
     "after",
     `
@@ -155,6 +162,7 @@ ${chalk.cyan.bold("Report Formats:")}
   html               ${chalk.gray("Interactive HTML report (opens in browser)")}
   json               ${chalk.gray("Machine-readable JSON output")}
   yaml               ${chalk.gray("Human-readable YAML output")}
+  sarif              ${chalk.gray("SARIF v2.1.0 for GitHub Code Scanning / CI")}
   all                ${chalk.gray("Generate all formats")}
 
 ${chalk.cyan.bold("Examples:")}
@@ -162,6 +170,8 @@ ${chalk.cyan.bold("Examples:")}
   ${chalk.gray("$")} vulcn run session.vulcn.yml -p xss sqli        ${chalk.gray("XSS + SQL injection")}
   ${chalk.gray("$")} vulcn run session.vulcn.yml -p xss sqli cmd    ${chalk.gray("Multiple types")}
   ${chalk.gray("$")} vulcn run session.vulcn.yml -p xss -r html     ${chalk.gray("With HTML report")}
+  ${chalk.gray("$")} vulcn run session.vulcn.yml -r sarif            ${chalk.gray("SARIF for CI/CD")}
+  ${chalk.gray("$")} vulcn run session.vulcn.yml --passive            ${chalk.gray("+ passive security scan")}
   ${chalk.gray("$")} vulcn run session.vulcn.yml --no-headless       ${chalk.gray("Visible browser")}
   ${chalk.gray("$")} vulcn run session.vulcn.yml -f custom.yml       ${chalk.gray("Custom payload file")}
 `,

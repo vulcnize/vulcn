@@ -2,14 +2,15 @@
  * @vulcn/plugin-report
  * Report Generation Plugin for Vulcn
  *
- * Generates security reports in HTML, JSON, and YAML formats
+ * Generates security reports in HTML, JSON, YAML, and SARIF formats
  * after a run completes. Features:
  * - Modern dark-themed HTML report with Vulcn branding
  * - Machine-readable JSON for CI/CD integration
  * - Human-readable YAML for documentation
+ * - SARIF v2.1.0 for GitHub Code Scanning and IDE integration
  *
  * Configuration:
- *   format:     "html" | "json" | "yaml" | "all"  (default: "html")
+ *   format:     "html" | "json" | "yaml" | "sarif" | "all"  (default: "html")
  *   outputDir:  directory for reports               (default: ".")
  *   filename:   base filename (no extension)        (default: "vulcn-report")
  *   open:       auto-open HTML in browser           (default: false)
@@ -28,6 +29,7 @@ import type {
 import { generateHtml, type HtmlReportData } from "./html";
 import { generateJson, type JsonReport } from "./json";
 import { generateYaml } from "./yaml";
+import { generateSarif, type SarifLog } from "./sarif";
 
 /**
  * Plugin configuration schema
@@ -38,10 +40,11 @@ const configSchema = z.object({
    * - "html":  Beautiful dark-themed HTML report
    * - "json":  Machine-readable structured JSON
    * - "yaml":  Human-readable YAML
-   * - "all":   Generate all three formats
+   * - "sarif": SARIF v2.1.0 for GitHub Code Scanning
+   * - "all":   Generate all formats
    * @default "html"
    */
-  format: z.enum(["html", "json", "yaml", "all"]).default("html"),
+  format: z.enum(["html", "json", "yaml", "sarif", "all"]).default("html"),
 
   /**
    * Output directory for report files
@@ -68,7 +71,7 @@ export type ReportConfig = z.infer<typeof configSchema>;
  * Determine which formats to generate
  */
 function getFormats(format: ReportConfig["format"]): string[] {
-  if (format === "all") return ["html", "json", "yaml"];
+  if (format === "all") return ["html", "json", "yaml", "sarif"];
   return [format];
 }
 
@@ -80,7 +83,7 @@ const plugin: VulcnPlugin = {
   version: "0.1.0",
   apiVersion: 1,
   description:
-    "Report generation plugin — generates beautiful HTML, JSON, and YAML security reports",
+    "Report generation plugin — generates HTML, JSON, YAML, and SARIF security reports",
 
   configSchema,
 
@@ -160,6 +163,24 @@ const plugin: VulcnPlugin = {
               ctx.logger.info(`📄 YAML report: ${yamlPath}`);
               break;
             }
+
+            case "sarif": {
+              const sarifReport = generateSarif(
+                ctx.session,
+                result,
+                generatedAt,
+                engineVersion,
+              );
+              const sarifPath = `${basePath}.sarif`;
+              await writeFile(
+                sarifPath,
+                JSON.stringify(sarifReport, null, 2),
+                "utf-8",
+              );
+              writtenFiles.push(sarifPath);
+              ctx.logger.info(`📄 SARIF report: ${sarifPath}`);
+              break;
+            }
           }
         } catch (err) {
           ctx.logger.error(
@@ -193,5 +214,11 @@ const plugin: VulcnPlugin = {
 export default plugin;
 
 // Named exports for programmatic usage
-export { configSchema, generateHtml, generateJson, generateYaml };
-export type { HtmlReportData, JsonReport };
+export {
+  configSchema,
+  generateHtml,
+  generateJson,
+  generateYaml,
+  generateSarif,
+};
+export type { HtmlReportData, JsonReport, SarifLog };
