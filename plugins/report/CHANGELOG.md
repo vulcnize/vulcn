@@ -1,6 +1,6 @@
 # @vulcn/plugin-report
 
-## 1.0.0
+## 0.6.0
 
 ### Patch Changes
 
