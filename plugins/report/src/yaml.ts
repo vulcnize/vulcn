@@ -1,31 +1,25 @@
 /**
  * YAML Report Generator for Vulcn
  *
- * Produces a human-readable YAML report.
+ * Produces a human-readable YAML report from the canonical VulcnReport.
  */
 
 import { stringify } from "yaml";
-import type { RunResult, Session } from "@vulcn/engine";
+import type { VulcnReport } from "./report-model";
 import { generateJson } from "./json";
 
-export function generateYaml(
-  session: Session,
-  result: RunResult,
-  generatedAt: string,
-  engineVersion: string,
-): string {
-  const report = generateJson(session, result, generatedAt, engineVersion);
+export function generateYaml(report: VulcnReport): string {
+  const jsonReport = generateJson(report);
 
-  // YAML with header comment
   const header = [
     "# ──────────────────────────────────────────────",
     "# Vulcn Security Report",
-    `# Generated: ${generatedAt}`,
-    `# Session: ${session.name}`,
-    `# Findings: ${result.findings.length}`,
+    `# Generated: ${report.generatedAt}`,
+    `# Session: ${report.session.name}`,
+    `# Findings: ${report.summary.totalFindings}`,
     "# ──────────────────────────────────────────────",
     "",
   ].join("\n");
 
-  return header + stringify(report, { indent: 2 });
+  return header + stringify(jsonReport, { indent: 2 });
 }

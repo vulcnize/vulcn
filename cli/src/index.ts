@@ -145,8 +145,10 @@ program
   .option("--report-output <dir>", "Output directory for reports", ".")
   .option(
     "--passive",
-    "Enable passive security scanner (headers, cookies, info-disclosure)",
+    "Run passive security scanner (headers, cookies, info-disclosure)",
+    true,
   )
+  .option("--no-passive", "Disable passive security scanner")
   .addHelpText(
     "after",
     `

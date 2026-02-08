@@ -3,11 +3,8 @@
  * Report Generation Plugin for Vulcn
  *
  * Generates security reports in HTML, JSON, YAML, and SARIF formats
- * after a run completes. Features:
- * - Modern dark-themed HTML report with Vulcn branding
- * - Machine-readable JSON for CI/CD integration
- * - Human-readable YAML for documentation
- * - SARIF v2.1.0 for GitHub Code Scanning and IDE integration
+ * after a run completes. All formats are projections of the canonical
+ * VulcnReport model, built once via buildReport().
  *
  * Configuration:
  *   format:     "html" | "json" | "yaml" | "sarif" | "all"  (default: "html")
@@ -18,7 +15,7 @@
 
 import { z } from "zod";
 import { writeFile, mkdir } from "node:fs/promises";
-import { resolve, dirname } from "node:path";
+import { resolve } from "node:path";
 import type {
   VulcnPlugin,
   PluginContext,
@@ -26,10 +23,11 @@ import type {
   RunResult,
 } from "@vulcn/engine";
 
-import { generateHtml, type HtmlReportData } from "./html";
-import { generateJson, type JsonReport } from "./json";
+import { buildReport } from "./report-model";
+import { generateHtml } from "./html";
+import { generateJson } from "./json";
 import { generateYaml } from "./yaml";
-import { generateSarif, type SarifLog } from "./sarif";
+import { generateSarif } from "./sarif";
 
 /**
  * Plugin configuration schema
@@ -96,7 +94,10 @@ const plugin: VulcnPlugin = {
     },
 
     /**
-     * Generate report(s) after run completes
+     * Generate report(s) after run completes.
+     *
+     * Architecture: RunResult + Session → buildReport() → VulcnReport
+     * Each output format is a pure projection of the canonical model.
      */
     onRunEnd: async (
       result: RunResult,
@@ -104,8 +105,14 @@ const plugin: VulcnPlugin = {
     ): Promise<RunResult> => {
       const config = configSchema.parse(ctx.config);
       const formats = getFormats(config.format);
-      const generatedAt = new Date().toISOString();
-      const engineVersion = ctx.engine.version;
+
+      // Build the canonical report model once — all formats derive from it
+      const report = buildReport(
+        ctx.session,
+        result,
+        new Date().toISOString(),
+        ctx.engine.version,
+      );
 
       // Ensure output directory exists
       const outDir = resolve(config.outputDir);
@@ -118,13 +125,7 @@ const plugin: VulcnPlugin = {
         try {
           switch (fmt) {
             case "html": {
-              const htmlData: HtmlReportData = {
-                session: ctx.session,
-                result,
-                generatedAt,
-                engineVersion,
-              };
-              const html = generateHtml(htmlData);
+              const html = generateHtml(report);
               const htmlPath = `${basePath}.html`;
               await writeFile(htmlPath, html, "utf-8");
               writtenFiles.push(htmlPath);
@@ -133,12 +134,7 @@ const plugin: VulcnPlugin = {
             }
 
             case "json": {
-              const jsonReport = generateJson(
-                ctx.session,
-                result,
-                generatedAt,
-                engineVersion,
-              );
+              const jsonReport = generateJson(report);
               const jsonPath = `${basePath}.json`;
               await writeFile(
                 jsonPath,
@@ -151,12 +147,7 @@ const plugin: VulcnPlugin = {
             }
 
             case "yaml": {
-              const yamlContent = generateYaml(
-                ctx.session,
-                result,
-                generatedAt,
-                engineVersion,
-              );
+              const yamlContent = generateYaml(report);
               const yamlPath = `${basePath}.yml`;
               await writeFile(yamlPath, yamlContent, "utf-8");
               writtenFiles.push(yamlPath);
@@ -165,12 +156,7 @@ const plugin: VulcnPlugin = {
             }
 
             case "sarif": {
-              const sarifReport = generateSarif(
-                ctx.session,
-                result,
-                generatedAt,
-                engineVersion,
-              );
+              const sarifReport = generateSarif(report);
               const sarifPath = `${basePath}.sarif`;
               await writeFile(
                 sarifPath,
@@ -220,5 +206,21 @@ export {
   generateJson,
   generateYaml,
   generateSarif,
+  buildReport,
 };
-export type { HtmlReportData, JsonReport, SarifLog };
+
+// Re-export the canonical model types
+export type {
+  VulcnReport,
+  EnrichedFinding,
+  ReportRule,
+  PassiveAnalysis,
+  PassiveCategorySummary,
+  RiskAssessment,
+  SeverityCounts,
+  CweEntry,
+  PassiveCheckDefinition,
+} from "./report-model";
+
+export type { JsonReport } from "./json";
+export type { SarifLog } from "./sarif";
