@@ -76,7 +76,8 @@ export async function crawlAndBuildSessions(
   config: BrowserCrawlConfig,
   options: CrawlOptions = {},
 ): Promise<Session[]> {
-  const opts = { ...CRAWL_DEFAULTS, ...options };
+  const opts = { ...CRAWL_DEFAULTS, ...options } as typeof CRAWL_DEFAULTS &
+    CrawlOptions;
   const startUrl = config.startUrl;
 
   let normalizedUrl: URL;
@@ -101,6 +102,9 @@ export async function crawlAndBuildSessions(
 
   const context: BrowserContext = await browser.newContext({
     viewport: config.viewport ?? { width: 1280, height: 720 },
+    ...(options.storageState
+      ? { storageState: JSON.parse(options.storageState) }
+      : {}),
   });
 
   try {

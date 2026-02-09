@@ -1,6 +1,13 @@
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { DriverManager } from "@vulcn/engine";
+import { existsSync } from "node:fs";
+import {
+  DriverManager,
+  decryptCredentials,
+  getPassphrase,
+} from "@vulcn/engine";
+import type { FormCredentials, Credentials, AuthConfig } from "@vulcn/engine";
+import { saveSessionDir } from "@vulcn/engine";
 import browserDriver from "@vulcn/driver-browser";
 import chalk from "chalk";
 import ora from "ora";
@@ -15,6 +22,7 @@ interface CrawlOptions {
   timeout: number;
   sameOrigin: boolean;
   runAfter?: string[];
+  creds?: string;
 }
 
 export async function crawlCommand(url: string, options: CrawlOptions) {
@@ -25,7 +33,6 @@ export async function crawlCommand(url: string, options: CrawlOptions) {
   console.log(chalk.gray(`   Max pages: ${options.maxPages}`));
   console.log(chalk.gray(`   Browser: ${options.browser}`));
   console.log(chalk.gray(`   Same origin: ${options.sameOrigin}`));
-  console.log();
 
   // Validate URL
   try {
@@ -34,6 +41,78 @@ export async function crawlCommand(url: string, options: CrawlOptions) {
     console.error(chalk.red(`Invalid URL: ${url}`));
     process.exit(1);
   }
+
+  // Handle authentication
+  let storageState: string | undefined;
+  let authConfig: AuthConfig | undefined;
+  let credentials: Credentials | undefined;
+
+  const credsFile = options.creds ?? ".vulcn/auth.enc";
+  if (existsSync(credsFile)) {
+    const authSpinner = ora("Authenticating...").start();
+    try {
+      const encrypted = await readFile(credsFile, "utf-8");
+      let passphrase: string;
+      try {
+        passphrase = getPassphrase();
+      } catch {
+        authSpinner.fail(
+          "Credentials found but no passphrase. Set VULCN_KEY or use --passphrase.",
+        );
+        process.exit(1);
+      }
+
+      credentials = decryptCredentials(encrypted, passphrase);
+
+      if (credentials.type === "form") {
+        // Perform login to get storage state
+        const { launchBrowser } = await import("@vulcn/driver-browser");
+        const { performLogin } = await import("@vulcn/driver-browser");
+
+        const { browser } = await launchBrowser({
+          browser: options.browser as "chromium" | "firefox" | "webkit",
+          headless: options.headless,
+        });
+
+        const context = await browser.newContext();
+        const page = await context.newPage();
+
+        const result = await performLogin(page, context, credentials, {
+          targetUrl: url,
+        });
+
+        if (result.success) {
+          storageState = result.storageState;
+          authConfig = {
+            strategy: "storage-state",
+            loginUrl: credentials.loginUrl,
+          };
+          authSpinner.succeed(
+            `Authenticated as ${chalk.cyan(credentials.username)}`,
+          );
+        } else {
+          authSpinner.warn(
+            `Login failed: ${result.message} — crawling without auth`,
+          );
+        }
+
+        await page.close();
+        await context.close();
+        await browser.close();
+      } else if (credentials.type === "header") {
+        // Header auth — pass directly (will be injected into page requests)
+        authConfig = { strategy: "header" };
+        authSpinner.succeed("Loaded header credentials");
+      }
+    } catch (err) {
+      authSpinner.fail(`Auth failed: ${err}`);
+    }
+  }
+
+  if (storageState) {
+    console.log(chalk.green(`   Auth: authenticated (storage state captured)`));
+  }
+  console.log();
 
   // Set up driver manager
   const drivers = new DriverManager();
@@ -57,6 +136,7 @@ export async function crawlCommand(url: string, options: CrawlOptions) {
         maxPages: options.maxPages,
         pageTimeout: options.timeout,
         sameOrigin: options.sameOrigin,
+        ...(storageState ? { storageState } : {}),
         onPageCrawled: (pageUrl, forms) => {
           pagesCrawled++;
           formsFound += forms;

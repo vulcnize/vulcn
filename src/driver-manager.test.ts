@@ -551,4 +551,108 @@ describe("DriverManager", () => {
       );
     });
   });
+
+  describe("executeScan", () => {
+    it("should return empty results for no sessions", async () => {
+      const pm = new PluginManager();
+      const { results, aggregate } = await manager.executeScan([], pm);
+
+      expect(results).toEqual([]);
+      expect(aggregate.stepsExecuted).toBe(0);
+      expect(aggregate.errors).toContain("No sessions to execute");
+    });
+
+    it("should aggregate results from multiple sessions", async () => {
+      manager.register(createMockDriver("mock"));
+      const sessions: Session[] = [
+        {
+          name: "Session A",
+          driver: "mock",
+          driverConfig: {},
+          steps: [{ id: "1", type: "mock.action", timestamp: 0 }],
+        },
+        {
+          name: "Session B",
+          driver: "mock",
+          driverConfig: {},
+          steps: [{ id: "2", type: "mock.action", timestamp: 0 }],
+        },
+      ];
+
+      const pm = new PluginManager();
+      const { results, aggregate } = await manager.executeScan(sessions, pm);
+
+      expect(results.length).toBe(2);
+      expect(aggregate.stepsExecuted).toBeGreaterThanOrEqual(0);
+      expect(aggregate.duration).toBeGreaterThanOrEqual(0);
+    });
+
+    it("should fire onScanStart hook with all sessions", async () => {
+      manager.register(createMockDriver("mock"));
+      const receivedSessions: Session[][] = [];
+
+      const pm = new PluginManager();
+      pm.addPlugin({
+        name: "test-scan-hook",
+        version: "1.0.0",
+        hooks: {
+          onScanStart: async (ctx) => {
+            receivedSessions.push(ctx.sessions);
+          },
+        },
+      });
+
+      const sessions: Session[] = [
+        {
+          name: "A",
+          driver: "mock",
+          driverConfig: {},
+          steps: [],
+        },
+        {
+          name: "B",
+          driver: "mock",
+          driverConfig: {},
+          steps: [],
+        },
+      ];
+
+      await manager.executeScan(sessions, pm);
+
+      expect(receivedSessions.length).toBe(1);
+      expect(receivedSessions[0].length).toBe(2);
+      expect(receivedSessions[0][0].name).toBe("A");
+      expect(receivedSessions[0][1].name).toBe("B");
+    });
+
+    it("should fire onScanEnd hook and allow result transformation", async () => {
+      manager.register(createMockDriver("mock"));
+      const pm = new PluginManager();
+      pm.addPlugin({
+        name: "test-scan-end",
+        version: "1.0.0",
+        hooks: {
+          onScanEnd: async (result, _ctx) => {
+            return {
+              ...result,
+              errors: [...result.errors, "scan-end-hook-ran"],
+            };
+          },
+        },
+      });
+
+      const sessions: Session[] = [
+        {
+          name: "S1",
+          driver: "mock",
+          driverConfig: {},
+          steps: [],
+        },
+      ];
+
+      const { aggregate } = await manager.executeScan(sessions, pm);
+
+      expect(aggregate.errors).toContain("scan-end-hook-ran");
+    });
+  });
 });

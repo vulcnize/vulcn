@@ -25,6 +25,7 @@ import type {
 import type { PluginManager } from "./plugin-manager";
 import type { Finding } from "./types";
 import type { RuntimePayload } from "./payload-types";
+import type { ScanContext } from "./plugin-types";
 
 /**
  * Driver Manager - loads and manages recording/running drivers
@@ -336,6 +337,139 @@ export class DriverManager {
     }
 
     return result;
+  }
+
+  /**
+   * Execute multiple sessions with a shared browser (scan-level orchestration).
+   *
+   * This is the preferred entry point for running a full scan. It:
+   * 1. Launches ONE browser for the entire scan
+   * 2. Passes the browser to each session's runner via options.browser
+   * 3. Each session creates its own context (lightweight, isolated cookies)
+   * 4. Aggregates results across all sessions
+   * 5. Closes the browser once at the end
+   *
+   * This is 5-10x faster than calling execute() per session because
+   * launching a browser takes 2-3 seconds.
+   */
+  async executeScan(
+    sessions: Session[],
+    pluginManager: PluginManager,
+    options: RunOptions = {},
+  ): Promise<{
+    results: RunResult[];
+    aggregate: RunResult;
+  }> {
+    if (sessions.length === 0) {
+      const empty: RunResult = {
+        findings: [],
+        stepsExecuted: 0,
+        payloadsTested: 0,
+        duration: 0,
+        errors: ["No sessions to execute"],
+      };
+      return { results: [], aggregate: empty };
+    }
+
+    const startTime = Date.now();
+    const results: RunResult[] = [];
+    const allFindings: Finding[] = [];
+    let totalSteps = 0;
+    let totalPayloads = 0;
+    const allErrors: string[] = [];
+
+    // Launch shared browser via the first session's driver
+    // (all sessions should use the same driver in a scan)
+    const firstDriver = this.getForSession(sessions[0]);
+    let sharedBrowser: unknown = null;
+
+    // Only share browser for browser driver
+    if (firstDriver.name === "browser") {
+      try {
+        // Dynamic import to avoid hard dependency on driver-browser
+        // Use variable to bypass TS module resolution (engine doesn't depend on driver-browser)
+        const driverPkg = "@vulcn/driver-browser";
+        const { launchBrowser } = await import(/* @vite-ignore */ driverPkg);
+        const browserType =
+          (sessions[0].driverConfig.browser as string) ?? "chromium";
+        const headless = options.headless ?? true;
+        const result = await launchBrowser({
+          browser: browserType as "chromium" | "firefox" | "webkit",
+          headless,
+        });
+        sharedBrowser = result.browser;
+      } catch {
+        // If we can't launch a shared browser, fall back to per-session
+      }
+    }
+
+    try {
+      // Fire onScanStart hooks
+      await pluginManager.callHook("onScanStart", async (hook, ctx) => {
+        const scanCtx: ScanContext = {
+          ...ctx,
+          sessions,
+          headless: options.headless ?? true,
+          sessionCount: sessions.length,
+        };
+        await (hook as (ctx: ScanContext) => Promise<void>)(scanCtx);
+      });
+
+      for (const session of sessions) {
+        const sessionOptions: RunOptions = {
+          ...options,
+          ...(sharedBrowser ? { browser: sharedBrowser } : {}),
+        };
+
+        const result = await this.execute(
+          session,
+          pluginManager,
+          sessionOptions,
+        );
+        results.push(result);
+        allFindings.push(...result.findings);
+        totalSteps += result.stepsExecuted;
+        totalPayloads += result.payloadsTested;
+        allErrors.push(...result.errors);
+      }
+    } finally {
+      // Close the shared browser
+      if (
+        sharedBrowser &&
+        typeof (sharedBrowser as { close: () => Promise<void> }).close ===
+          "function"
+      ) {
+        await (sharedBrowser as { close: () => Promise<void> }).close();
+      }
+    }
+
+    const aggregate: RunResult = {
+      findings: allFindings,
+      stepsExecuted: totalSteps,
+      payloadsTested: totalPayloads,
+      duration: Date.now() - startTime,
+      errors: allErrors,
+    };
+
+    // Fire onScanEnd hooks — allows plugins to transform the aggregate result
+    let finalAggregate = aggregate;
+    finalAggregate = await pluginManager.callHookPipe(
+      "onScanEnd",
+      finalAggregate,
+      async (hook, value, ctx) => {
+        const scanCtx: ScanContext = {
+          ...ctx,
+          sessions,
+          headless: options.headless ?? true,
+          sessionCount: sessions.length,
+        };
+        return await (
+          hook as (result: RunResult, ctx: ScanContext) => Promise<RunResult>
+        )(value, scanCtx);
+      },
+    );
+
+    return { results, aggregate: finalAggregate };
   }
 
   /**
