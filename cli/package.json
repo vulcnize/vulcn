@@ -1,6 +1,6 @@
 {
   "name": "vulcn",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Modern, fast penetration testing CLI — record browser interactions once, replay with security payloads, and find vulnerabilities like XSS and SQLi automatically. A lightweight, pluggable alternative to legacy security scanners.",
   "type": "module",
   "bin": {

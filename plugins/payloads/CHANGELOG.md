@@ -1,5 +1,12 @@
 # @vulcn/plugin-payloads
 
+## 0.4.1
+
+### Patch Changes
+
+- Updated dependencies [15d8504]
+  - @vulcn/engine@0.8.0
+
 ## 0.4.0
 
 ### Patch Changes
