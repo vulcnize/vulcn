@@ -16,6 +16,7 @@ export default defineConfig({
       "cli/**/*.test.ts",
       "test/**/*.test.ts",
       "plugins/**/*.test.ts",
+      "drivers/**/*.test.ts",
     ],
     exclude: ["**/node_modules/**", "**/dist/**"],
     setupFiles: ["test/setup.ts"],

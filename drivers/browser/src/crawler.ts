@@ -7,14 +7,21 @@
  * - Links to follow for deeper crawling
  *
  * Outputs Session[] that are directly compatible with BrowserRunner.
+ * Also generates CapturedRequest[] metadata for Tier 1 HTTP fast scanning.
  *
  * This is the "auto-record" mode — instead of a human clicking around,
  * the crawler automatically discovers injection points.
  */
 
 import type { Page, Browser, BrowserContext } from "playwright";
-import type { Session, Step, CrawlOptions } from "@vulcn/engine";
+import type {
+  Session,
+  Step,
+  CrawlOptions,
+  CapturedRequest,
+} from "@vulcn/engine";
 import { launchBrowser, type BrowserType } from "./browser";
+import { buildCapturedRequests } from "./http-scanner";
 
 // ── Internal Types ─────────────────────────────────────────────────────
 
@@ -67,15 +74,23 @@ export interface BrowserCrawlConfig {
   viewport?: { width: number; height: number };
 }
 
+/** Result from crawling — sessions for browser replay + requests for HTTP scanning */
+export interface CrawlResult {
+  sessions: Session[];
+  capturedRequests: CapturedRequest[];
+}
+
 /**
  * Crawl a URL and generate sessions.
  *
  * This is called by the browser driver's recorder.crawl() method.
+ * Returns both Session[] for Tier 2 browser replay and
+ * CapturedRequest[] for Tier 1 HTTP fast scanning.
  */
 export async function crawlAndBuildSessions(
   config: BrowserCrawlConfig,
   options: CrawlOptions = {},
-): Promise<Session[]> {
+): Promise<CrawlResult> {
   const opts = { ...CRAWL_DEFAULTS, ...options } as typeof CRAWL_DEFAULTS &
     CrawlOptions;
   const startUrl = config.startUrl;
@@ -170,7 +185,26 @@ export async function crawlAndBuildSessions(
   );
 
   // Convert discovered forms to sessions
-  return buildSessions(allForms);
+  const sessions = buildSessions(allForms);
+
+  // Build HTTP request metadata for Tier 1 fast scanning
+  const capturedRequests = buildCapturedRequests(
+    allForms
+      .filter((f) => f.inputs.some((i) => i.injectable))
+      .map((form, idx) => ({
+        pageUrl: form.pageUrl,
+        action: form.action,
+        method: form.method,
+        inputs: form.inputs,
+        sessionName: sessions[idx]?.name ?? `form-${idx + 1}`,
+      })),
+  );
+
+  console.log(
+    `[crawler] Generated ${sessions.length} session(s), ${capturedRequests.length} HTTP request(s) for Tier 1`,
+  );
+
+  return { sessions, capturedRequests };
 }
 
 // ── Form Discovery ─────────────────────────────────────────────────────
