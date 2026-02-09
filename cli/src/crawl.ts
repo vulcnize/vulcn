@@ -1,17 +1,16 @@
-import { writeFile, mkdir, readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import {
   DriverManager,
   decryptCredentials,
   getPassphrase,
 } from "@vulcn/engine";
-import type { FormCredentials, Credentials, AuthConfig } from "@vulcn/engine";
+import type { Credentials, AuthConfig } from "@vulcn/engine";
 import { saveSessionDir } from "@vulcn/engine";
 import browserDriver from "@vulcn/driver-browser";
 import chalk from "chalk";
 import ora from "ora";
-import { stringify } from "yaml";
 
 interface CrawlOptions {
   output: string;
@@ -46,12 +45,14 @@ export async function crawlCommand(url: string, options: CrawlOptions) {
   let storageState: string | undefined;
   let authConfig: AuthConfig | undefined;
   let credentials: Credentials | undefined;
+  let encryptedState: string | undefined;
 
   const credsFile = options.creds ?? ".vulcn/auth.enc";
   if (existsSync(credsFile)) {
     const authSpinner = ora("Authenticating...").start();
     try {
       const encrypted = await readFile(credsFile, "utf-8");
+      encryptedState = encrypted;
       let passphrase: string;
       try {
         passphrase = getPassphrase();
@@ -167,25 +168,27 @@ export async function crawlCommand(url: string, options: CrawlOptions) {
       return;
     }
 
-    // Save sessions
+    // Save sessions using v2 session directory format
     const saveSpinner = ora("Saving sessions...").start();
 
     const outputDir = resolve(options.output);
-    await mkdir(outputDir, { recursive: true });
+    const parsedUrl = new URL(url);
 
-    const savedFiles: string[] = [];
-
-    for (let i = 0; i < sessions.length; i++) {
-      const session = sessions[i];
-      const filename = sanitizeFilename(session.name, i);
-      const filepath = join(outputDir, filename);
-      const yaml = stringify(session);
-      await writeFile(filepath, yaml, "utf-8");
-      savedFiles.push(filepath);
-    }
+    await saveSessionDir(outputDir, {
+      name: `crawl-${parsedUrl.hostname}`,
+      target: url,
+      driver: "browser",
+      driverConfig: {
+        browser: options.browser,
+        headless: options.headless,
+      },
+      sessions,
+      authConfig,
+      encryptedState: storageState ? encryptedState : undefined,
+    });
 
     saveSpinner.succeed(
-      `Saved ${chalk.cyan(sessions.length)} session file(s) to ${chalk.green(outputDir)}`,
+      `Saved ${chalk.cyan(sessions.length)} session(s) to ${chalk.green(outputDir)}`,
     );
 
     // Summary table
@@ -200,26 +203,17 @@ export async function crawlCommand(url: string, options: CrawlOptions) {
           s.type === "browser.input" &&
           (s as Record<string, unknown>).injectable,
       ).length;
-      const filename = savedFiles[i].split("/").pop();
-      console.log(`  ${chalk.white(`${i + 1}.`)} ${chalk.gray(filename)}`);
+      console.log(`  ${chalk.white(`${i + 1}.`)} ${chalk.gray(session.name)}`);
       console.log(
         chalk.gray(
-          `     ${session.name} — ${injectableCount} injectable input(s), ${session.steps.length} steps`,
+          `     ${injectableCount} injectable input(s), ${session.steps.length} steps`,
         ),
       );
     }
 
     console.log();
     console.log(chalk.gray("Next steps:"));
-    console.log(chalk.white(`  vulcn run ${savedFiles[0]} -p xss sqli`));
-
-    if (sessions.length > 1) {
-      console.log();
-      console.log(chalk.gray("Run all sessions:"));
-      for (const file of savedFiles) {
-        console.log(chalk.white(`  vulcn run ${file} -p xss`));
-      }
-    }
+    console.log(chalk.white(`  vulcn run ${outputDir} -p xss sqli`));
 
     // If --run-after was specified, chain into run
     if (options.runAfter && options.runAfter.length > 0) {
@@ -230,36 +224,21 @@ export async function crawlCommand(url: string, options: CrawlOptions) {
       // Dynamic import to avoid circular deps
       const { runCommand } = await import("./run");
 
-      for (const sessionFile of savedFiles) {
-        console.log(chalk.gray(`── Running: ${sessionFile} ──`));
-        try {
-          await runCommand(sessionFile, {
-            payload: options.runAfter,
-            browser: options.browser,
-            headless: options.headless,
-          });
-        } catch {
-          // runCommand handles its own errors and exits
-        }
-        console.log();
+      console.log(chalk.gray(`── Running: ${outputDir} ──`));
+      try {
+        await runCommand(outputDir, {
+          payload: options.runAfter,
+          browser: options.browser,
+          headless: options.headless,
+        });
+      } catch {
+        // runCommand handles its own errors and exits
       }
+      console.log();
     }
   } catch (err) {
     crawlSpinner.fail("Crawl failed");
     console.error(chalk.red(String(err)));
     process.exit(1);
   }
-}
-
-/**
- * Create a safe filename from a session name.
- */
-function sanitizeFilename(name: string, index: number): string {
-  const sanitized = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 60);
-
-  return `${String(index + 1).padStart(2, "0")}-${sanitized || "session"}.vulcn.yml`;
 }
