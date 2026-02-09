@@ -71,7 +71,7 @@ jobs:
 
       - name: Run benchmarks (release)
         if: github.event_name == 'release'
-        run: pnpm tsx benchmarks/run.ts --publish
+        run: npx tsx benchmarks/run.ts --publish
         env:
           API_SECRET: ${{ secrets.API_SECRET }}
           BENCHMARK_API_URL: https://vulcn.dev/api/benchmarks
@@ -86,7 +86,7 @@ jobs:
           if [ "${{ inputs.publish }}" = "true" ]; then
             ARGS="$ARGS --publish"
           fi
-          pnpm tsx benchmarks/run.ts $ARGS
+          npx tsx benchmarks/run.ts $ARGS
         env:
           API_SECRET: ${{ secrets.API_SECRET }}
           BENCHMARK_API_URL: https://vulcn.dev/api/benchmarks
