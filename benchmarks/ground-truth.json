@@ -1,0 +1,218 @@
+{
+  "$schema": "./ground-truth.schema.json",
+  "targets": [
+    {
+      "name": "testphp.vulnweb.com",
+      "url": "http://testphp.vulnweb.com",
+      "authRequired": false,
+      "vulns": [
+        {
+          "type": "xss",
+          "url": "/search.php",
+          "field": "searchFor",
+          "method": "GET",
+          "description": "Reflected XSS in search field"
+        },
+        {
+          "type": "xss",
+          "url": "/guestbook.php",
+          "field": "name",
+          "method": "POST",
+          "description": "Stored XSS in guestbook name field"
+        },
+        {
+          "type": "xss",
+          "url": "/guestbook.php",
+          "field": "text",
+          "method": "POST",
+          "description": "Stored XSS in guestbook text field"
+        },
+        {
+          "type": "xss",
+          "url": "/comment.php",
+          "field": "name",
+          "method": "POST",
+          "description": "XSS in comment name field"
+        },
+        {
+          "type": "sqli",
+          "url": "/artists.php",
+          "field": "artist",
+          "method": "GET",
+          "description": "SQL injection in artist parameter"
+        },
+        {
+          "type": "sqli",
+          "url": "/listproducts.php",
+          "field": "cat",
+          "method": "GET",
+          "description": "SQL injection in category parameter"
+        },
+        {
+          "type": "sqli",
+          "url": "/search.php",
+          "field": "searchFor",
+          "method": "GET",
+          "description": "SQL injection in search field"
+        },
+        {
+          "type": "xss",
+          "url": "/hpp/",
+          "field": "pp",
+          "method": "GET",
+          "description": "HTTP parameter pollution / reflected XSS"
+        }
+      ]
+    },
+    {
+      "name": "testhtml5.vulnweb.com",
+      "url": "http://testhtml5.vulnweb.com",
+      "authRequired": false,
+      "vulns": [
+        {
+          "type": "xss",
+          "url": "/",
+          "field": "searchterm",
+          "method": "GET",
+          "description": "Reflected XSS in HTML5 search input"
+        },
+        {
+          "type": "xss",
+          "url": "/contact",
+          "field": "name",
+          "method": "POST",
+          "description": "XSS in contact form name field"
+        },
+        {
+          "type": "xss",
+          "url": "/contact",
+          "field": "comment",
+          "method": "POST",
+          "description": "XSS in contact form comment field"
+        }
+      ]
+    },
+    {
+      "name": "testaspnet.vulnweb.com",
+      "url": "http://testaspnet.vulnweb.com",
+      "authRequired": false,
+      "vulns": [
+        {
+          "type": "xss",
+          "url": "/Search.aspx",
+          "field": "tbSearch",
+          "method": "POST",
+          "description": "Reflected XSS in ASP.NET search"
+        },
+        {
+          "type": "xss",
+          "url": "/ReadNews.aspx",
+          "field": "id",
+          "method": "GET",
+          "description": "Reflected XSS in news ID parameter"
+        },
+        {
+          "type": "sqli",
+          "url": "/ReadNews.aspx",
+          "field": "id",
+          "method": "GET",
+          "description": "SQL injection in news ID parameter"
+        }
+      ]
+    },
+    {
+      "name": "DVWA",
+      "url": "http://localhost:4280",
+      "authRequired": true,
+      "credentials": {
+        "username": "admin",
+        "password": "password",
+        "loginUrl": "/login.php"
+      },
+      "vulns": [
+        {
+          "type": "xss",
+          "url": "/vulnerabilities/xss_r/",
+          "field": "name",
+          "method": "GET",
+          "description": "Reflected XSS (low security)"
+        },
+        {
+          "type": "xss",
+          "url": "/vulnerabilities/xss_s/",
+          "field": "txtName",
+          "method": "POST",
+          "description": "Stored XSS in name field (low security)"
+        },
+        {
+          "type": "xss",
+          "url": "/vulnerabilities/xss_s/",
+          "field": "mtxMessage",
+          "method": "POST",
+          "description": "Stored XSS in message field (low security)"
+        },
+        {
+          "type": "sqli",
+          "url": "/vulnerabilities/sqli/",
+          "field": "id",
+          "method": "GET",
+          "description": "SQL injection in user ID field (low security)"
+        },
+        {
+          "type": "sqli",
+          "url": "/vulnerabilities/sqli_blind/",
+          "field": "id",
+          "method": "GET",
+          "description": "Blind SQL injection (low security)"
+        },
+        {
+          "type": "command-injection",
+          "url": "/vulnerabilities/exec/",
+          "field": "ip",
+          "method": "POST",
+          "description": "Command injection in ping field (low security)"
+        }
+      ]
+    },
+    {
+      "name": "WebGoat",
+      "url": "http://localhost:8080/WebGoat",
+      "authRequired": true,
+      "credentials": {
+        "username": "guest",
+        "password": "guest",
+        "loginUrl": "/WebGoat/login"
+      },
+      "vulns": [
+        {
+          "type": "xss",
+          "url": "/WebGoat/CrossSiteScripting/attack5a",
+          "field": "answer",
+          "method": "POST",
+          "description": "Reflected XSS lesson"
+        },
+        {
+          "type": "sqli",
+          "url": "/WebGoat/SqlInjection/attack5a",
+          "field": "account",
+          "method": "POST",
+          "description": "SQL injection lesson"
+        },
+        {
+          "type": "sqli",
+          "url": "/WebGoat/SqlInjection/attack5b",
+          "field": "login_count",
+          "method": "POST",
+          "description": "Numeric SQL injection lesson"
+        },
+        {
+          "type": "path-traversal",
+          "url": "/WebGoat/PathTraversal/random",
+          "field": "fullName",
+          "method": "POST",
+          "description": "Path traversal lesson"
+        }
+      ]
+    }
+  ]
+}

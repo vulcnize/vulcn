@@ -1,0 +1,136 @@
+name: Benchmark
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      skip_docker:
+        description: "Skip Docker targets (DVWA, WebGoat)"
+        type: boolean
+        default: true
+      publish:
+        description: "Publish results to vulcn.dev"
+        type: boolean
+        default: true
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+
+    services:
+      # DVWA container for authenticated scanning tests
+      dvwa:
+        image: vulnerables/web-dvwa
+        ports:
+          - 4280:80
+        options: >-
+          --health-cmd "curl -f http://localhost/ || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build CLI
+        run: pnpm build
+        working-directory: ./vulcn
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
+        working-directory: ./vulcn
+
+      - name: Run benchmarks (release)
+        if: github.event_name == 'release'
+        run: pnpm tsx benchmarks/run.ts --publish
+        working-directory: ./vulcn
+        env:
+          API_SECRET: ${{ secrets.API_SECRET }}
+          BENCHMARK_API_URL: https://vulcn.dev/api/benchmarks
+
+      - name: Run benchmarks (manual)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          ARGS=""
+          if [ "${{ inputs.skip_docker }}" = "true" ]; then
+            ARGS="$ARGS --skip-docker"
+          fi
+          if [ "${{ inputs.publish }}" = "true" ]; then
+            ARGS="$ARGS --publish"
+          fi
+          pnpm tsx benchmarks/run.ts $ARGS
+        working-directory: ./vulcn
+        env:
+          API_SECRET: ${{ secrets.API_SECRET }}
+          BENCHMARK_API_URL: https://vulcn.dev/api/benchmarks
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: vulcn/benchmarks/results/
+          retention-days: 90
+
+      - name: Comment on release
+        if: github.event_name == 'release'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const glob = require('glob');
+
+            // Find the latest results file
+            const files = fs.readdirSync('./vulcn/benchmarks/results/');
+            const jsonFile = files.find(f => f.endsWith('.json') && !f.startsWith('sessions'));
+            if (!jsonFile) return;
+
+            const results = JSON.parse(fs.readFileSync(`./vulcn/benchmarks/results/${jsonFile}`, 'utf-8'));
+
+            const body = `## 📊 Benchmark Results — v${results.version}
+
+            | Metric | Value |
+            |--------|-------|
+            | **Youden Score** | ${results.score.toFixed(3)} |
+            | **TPR** (sensitivity) | ${(results.tpr * 100).toFixed(1)}% |
+            | **FPR** (false alarms) | ${(results.fpr * 100).toFixed(1)}% |
+            | **Known Vulns** | ${results.summary.totalKnown} |
+            | **Detected** | ${results.summary.detected} |
+            | **Missed** | ${results.summary.missed} |
+            | **False Positives** | ${results.summary.falsePositives} |
+            | **Duration** | ${(results.duration / 1000).toFixed(1)}s |
+
+            ### Per-Target Breakdown
+
+            | Target | TPR | FPR | Youden | Known | Detected |
+            |--------|-----|-----|--------|-------|----------|
+            ${results.targets.map(t =>
+              `| ${t.name} | ${(t.tpr * 100).toFixed(0)}% | ${(t.fpr * 100).toFixed(0)}% | ${t.score.toFixed(3)} | ${t.knownVulns} | ${t.detected} |`
+            ).join('\n')}
+
+            [View full results on vulcn.dev/benchmarks](https://vulcn.dev/benchmarks)`;
+
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: context.payload.release.id,
+              body: context.payload.release.body + '\n\n' + body,
+            });
