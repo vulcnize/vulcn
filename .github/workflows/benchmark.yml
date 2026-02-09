@@ -38,11 +38,9 @@ jobs:
 
       - name: Build CLI
         run: pnpm build
-        working-directory: ./vulcn
 
       - name: Install Playwright browsers
         run: npx playwright install chromium
-        working-directory: ./vulcn
 
       # Start DVWA manually instead of as a service — its health check
       # returns 302 on / which makes GH Actions services mark it unhealthy
@@ -74,7 +72,6 @@ jobs:
       - name: Run benchmarks (release)
         if: github.event_name == 'release'
         run: pnpm tsx benchmarks/run.ts --publish
-        working-directory: ./vulcn
         env:
           API_SECRET: ${{ secrets.API_SECRET }}
           BENCHMARK_API_URL: https://vulcn.dev/api/benchmarks
@@ -90,7 +87,6 @@ jobs:
             ARGS="$ARGS --publish"
           fi
           pnpm tsx benchmarks/run.ts $ARGS
-        working-directory: ./vulcn
         env:
           API_SECRET: ${{ secrets.API_SECRET }}
           BENCHMARK_API_URL: https://vulcn.dev/api/benchmarks
@@ -100,7 +96,7 @@ jobs:
         if: always()
         with:
           name: benchmark-results
-          path: vulcn/benchmarks/results/
+          path: benchmarks/results/
           retention-days: 90
 
       - name: Comment on release
@@ -111,7 +107,7 @@ jobs:
             const fs = require('fs');
 
             // Find the latest results file
-            const dir = './vulcn/benchmarks/results/';
+            const dir = './benchmarks/results/';
             if (!fs.existsSync(dir)) return;
 
             const files = fs.readdirSync(dir);
