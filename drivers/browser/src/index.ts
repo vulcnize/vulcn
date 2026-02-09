@@ -177,3 +177,5 @@ export { BrowserRecorder } from "./recorder";
 export { BrowserRunner } from "./runner";
 export { crawlAndBuildSessions } from "./crawler";
 export { launchBrowser, checkBrowsers, installBrowsers } from "./browser";
+export { detectLoginForm, performLogin, checkSessionAlive } from "./auth";
+export type { LoginForm, LoginResult } from "./auth";

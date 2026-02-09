@@ -1,5 +1,15 @@
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { DriverManager, PluginManager } from "@vulcn/engine";
+import {
+  loadSessionDir,
+  isSessionDir,
+  looksLikeSessionDir,
+  readAuthState,
+  decryptStorageState,
+  getPassphrase,
+} from "@vulcn/engine";
+import type { Session } from "@vulcn/engine";
 import browserDriver from "@vulcn/driver-browser";
 import chalk from "chalk";
 import ora from "ora";
@@ -13,9 +23,10 @@ interface RunOptions {
   report?: string;
   reportOutput?: string;
   passive?: boolean;
+  creds?: string;
 }
 
-export async function runCommand(sessionFile: string, options: RunOptions) {
+export async function runCommand(sessionInput: string, options: RunOptions) {
   // Create plugin manager for this run
   const manager = new PluginManager();
 
@@ -29,26 +40,106 @@ export async function runCommand(sessionFile: string, options: RunOptions) {
   const drivers = new DriverManager();
   drivers.register(browserDriver);
 
-  // Load session
+  // Load session(s) — v2 directory or legacy file
   const loadSpinner = ora("Loading session...").start();
 
-  let sessionYaml: string;
+  let sessions: Session[] = [];
+  let storageState: string | undefined;
+
   try {
-    sessionYaml = await readFile(sessionFile, "utf-8");
-  } catch {
-    loadSpinner.fail(`Cannot read file: ${sessionFile}`);
+    if (isSessionDir(sessionInput) || looksLikeSessionDir(sessionInput)) {
+      // v2 format: .vulcn/ directory
+      const loaded = await loadSessionDir(sessionInput);
+      sessions = loaded.sessions;
+
+      // Load encrypted auth state if available
+      const encState = await readAuthState(sessionInput);
+      if (encState) {
+        try {
+          const passphrase = getPassphrase();
+          storageState = decryptStorageState(encState, passphrase);
+        } catch {
+          loadSpinner.warn(
+            "Auth state found but VULCN_KEY not set — scanning without auth",
+          );
+        }
+      }
+
+      loadSpinner.succeed(
+        `Loaded ${chalk.cyan(sessions.length)} session(s) from ${chalk.cyan(sessionInput)}` +
+          (storageState ? chalk.green(" (authenticated)") : ""),
+      );
+    } else {
+      // Legacy: single .vulcn.yml file
+      const sessionYaml = await readFile(sessionInput, "utf-8");
+      const session = drivers.parseSession(sessionYaml, "browser");
+      sessions = [session];
+      loadSpinner.succeed(`Loaded session: ${chalk.cyan(session.name)}`);
+    }
+  } catch (err) {
+    loadSpinner.fail(`Cannot load session: ${sessionInput}`);
+    console.error(chalk.red(String(err)));
     process.exit(1);
   }
 
-  // Parse session — supports both legacy and driver-based formats
-  let session;
-  try {
-    session = drivers.parseSession(sessionYaml, "browser");
-    loadSpinner.succeed(`Loaded session: ${chalk.cyan(session.name)}`);
-  } catch (err) {
-    loadSpinner.fail("Invalid session file");
-    console.error(chalk.red(String(err)));
-    process.exit(1);
+  if (sessions.length === 0) {
+    console.error(chalk.yellow("No injectable sessions found."));
+    process.exit(0);
+  }
+
+  // Handle --creds for authentication (works for both v2 and legacy sessions)
+  if (!storageState && options.creds && existsSync(options.creds)) {
+    const authSpinner = ora("Authenticating...").start();
+    try {
+      const encrypted = await readFile(options.creds, "utf-8");
+      const passphrase = getPassphrase();
+      const { decryptCredentials } = await import("@vulcn/engine");
+      const credentials = decryptCredentials(encrypted, passphrase);
+
+      if (credentials.type === "form") {
+        const { launchBrowser, performLogin } =
+          await import("@vulcn/driver-browser");
+
+        const { browser } = await launchBrowser({
+          browser: options.browser as "chromium" | "firefox" | "webkit",
+          headless: options.headless,
+        });
+
+        const context = await browser.newContext();
+        const page = await context.newPage();
+
+        // Determine target URL from the first session's navigate step
+        const firstNav = sessions[0].steps.find(
+          (s) => s.type === "browser.navigate",
+        );
+        const targetUrl =
+          (firstNav as { url?: string })?.url ?? "http://localhost";
+
+        const result = await performLogin(page, context, credentials, {
+          targetUrl,
+        });
+
+        if (result.success) {
+          storageState = result.storageState;
+          authSpinner.succeed(
+            `Authenticated as ${chalk.cyan(credentials.username)}`,
+          );
+        } else {
+          authSpinner.warn(
+            `Login failed: ${result.message} — scanning without auth`,
+          );
+        }
+
+        await page.close();
+        await context.close();
+        await browser.close();
+      } else if (credentials.type === "header") {
+        authSpinner.succeed("Loaded header credentials");
+        // TODO: inject headers into runner options
+      }
+    } catch (err) {
+      authSpinner.warn(`Auth failed: ${err} — scanning without auth`);
+    }
   }
 
   // Add payloads from custom file
@@ -176,7 +267,11 @@ export async function runCommand(sessionFile: string, options: RunOptions) {
 
   console.log();
   console.log(chalk.cyan("🔍 Running security tests"));
-  console.log(chalk.gray(`   Session: ${session.name}`));
+  console.log(
+    chalk.gray(
+      `   Sessions: ${sessions.length} (${sessions.map((s) => s.name).join(", ")})`,
+    ),
+  );
   console.log(
     chalk.gray(`   Payloads: ${payloads.map((p) => p.name).join(", ")}`),
   );
@@ -187,25 +282,47 @@ export async function runCommand(sessionFile: string, options: RunOptions) {
   );
   console.log(chalk.gray(`   Browser: ${options.browser}`));
   console.log(chalk.gray(`   Headless: ${options.headless}`));
+  if (storageState) {
+    console.log(chalk.green(`   Auth: authenticated (storage state loaded)`));
+  }
   console.log();
 
   const runSpinner = ora("Executing tests...").start();
 
   try {
-    const result = await drivers.execute(session, manager, {
-      headless: options.headless,
-      onFinding: (finding) => {
-        runSpinner.stop();
-        console.log(chalk.red(`⚠️  FINDING: ${finding.title}`));
-        console.log(chalk.gray(`   Step: ${finding.stepId}`));
-        console.log(
-          chalk.gray(`   Payload: ${finding.payload.slice(0, 50)}...`),
-        );
-        console.log(chalk.gray(`   URL: ${finding.url}`));
-        console.log();
-        runSpinner.start("Continuing tests...");
-      },
-    });
+    const onFinding = (finding: {
+      title: string;
+      stepId: string;
+      payload: string;
+      url: string;
+    }) => {
+      runSpinner.stop();
+      console.log(chalk.red(`⚠️  FINDING: ${finding.title}`));
+      console.log(chalk.gray(`   Step: ${finding.stepId}`));
+      console.log(chalk.gray(`   Payload: ${finding.payload.slice(0, 50)}...`));
+      console.log(chalk.gray(`   URL: ${finding.url}`));
+      console.log();
+      runSpinner.start("Continuing tests...");
+    };
+
+    let result;
+
+    if (sessions.length === 1) {
+      // Single session — use execute() directly
+      result = await drivers.execute(sessions[0], manager, {
+        headless: options.headless,
+        ...(storageState ? { storageState } : {}),
+        onFinding,
+      });
+    } else {
+      // Multiple sessions — use executeScan() for shared browser
+      const scanResult = await drivers.executeScan(sessions, manager, {
+        headless: options.headless,
+        ...(storageState ? { storageState } : {}),
+        onFinding,
+      });
+      result = scanResult.aggregate;
+    }
 
     runSpinner.succeed("Tests completed");
     console.log();

@@ -3,6 +3,7 @@ import chalk from "chalk";
 import { recordCommand } from "./record";
 import { runCommand } from "./run";
 import { crawlCommand } from "./crawl";
+import { storeCommand } from "./store";
 import { payloadsCommand } from "./payloads";
 import { installCommand, doctorCommand } from "./install";
 import { initCommand } from "./init";
@@ -29,6 +30,11 @@ ${chalk.cyan.bold("Quick Start:")}
   ${chalk.gray("$")} vulcn crawl https://example.com              ${chalk.gray("Auto-discover forms & inputs")}
   ${chalk.gray("$")} vulcn run session.vulcn.yml                  ${chalk.gray("Run with default payloads")}
   ${chalk.gray("$")} vulcn run session.vulcn.yml -p xss sqli     ${chalk.gray("Run with specific payloads")}
+
+${chalk.cyan.bold("Authenticated Scans:")}
+  ${chalk.gray("$")} vulcn store admin password123                ${chalk.gray("Store credentials (encrypted)")}
+  ${chalk.gray("$")} vulcn crawl https://dvwa.local --creds       ${chalk.gray("Auth-crawl with stored creds")}
+  ${chalk.gray("$")} vulcn run dvwa.vulcn/                        ${chalk.gray("Run (auto-uses auth state)")}
 
 ${chalk.cyan.bold("Docs:")} https://docs.vulcn.dev
 `,
@@ -69,6 +75,36 @@ ${chalk.cyan.bold("How it works:")}
   )
   .action(recordCommand);
 
+// vulcn store
+program
+  .command("store")
+  .description("Store encrypted credentials for authenticated scans")
+  .argument("[username]", "Username for form-based login")
+  .argument("[password]", "Password for form-based login")
+  .option(
+    "--header <header>",
+    'Header auth (e.g., "Authorization: Bearer xyz")',
+  )
+  .option("-o, --output <file>", "Output file path", ".vulcn/auth.enc")
+  .option(
+    "--passphrase <passphrase>",
+    "Encryption passphrase (or set VULCN_KEY)",
+  )
+  .option("--login-url <url>", "Custom login URL")
+  .option("--user-field <selector>", "Custom CSS selector for username field")
+  .option("--pass-field <selector>", "Custom CSS selector for password field")
+  .addHelpText(
+    "after",
+    `
+${chalk.cyan.bold("Examples:")}
+  ${chalk.gray("$")} vulcn store admin password123
+  ${chalk.gray("$")} vulcn store admin password123 --login-url https://dvwa.local/login
+  ${chalk.gray("$")} vulcn store --header "Authorization: Bearer abc123"
+  ${chalk.gray("$")} VULCN_KEY=mykey vulcn store admin pass     ${chalk.gray("CI/CD (no prompt)")}
+`,
+  )
+  .action(storeCommand);
+
 // vulcn crawl
 program
   .command("crawl")
@@ -86,6 +122,11 @@ program
   .option("--no-headless", "Run with visible browser")
   .option("-t, --timeout <ms>", "Page timeout in ms", "10000")
   .option("--no-same-origin", "Allow following cross-origin links")
+  .option(
+    "--creds <file>",
+    "Credentials file for authenticated crawling",
+    ".vulcn/auth.enc",
+  )
   .option(
     "--run-after <payloads...>",
     "Auto-run scans after crawl with these payloads",
@@ -129,7 +170,7 @@ ${chalk.cyan.bold("Benchmarking:")}
 program
   .command("run")
   .description("Run a recorded session with payloads")
-  .argument("<session>", "Session file to run (.vulcn.yml)")
+  .argument("<session>", "Session file or .vulcn/ directory to run")
   .option("-p, --payload <names...>", "Payloads to use (see list below)")
   .option(
     "-f, --payload-file <file>",
@@ -149,6 +190,7 @@ program
     true,
   )
   .option("--no-passive", "Disable passive security scanner")
+  .option("--creds <file>", "Credentials file for authenticated scans")
   .addHelpText(
     "after",
     `

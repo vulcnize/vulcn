@@ -101,7 +101,17 @@ export interface PluginHooks {
   onRecordEnd?: (session: Session, ctx: RecordContext) => Promise<Session>;
 
   // ─────────────────────────────────────────────────────────────────
-  // Running Phase
+  // Scan Phase (wraps all sessions)
+  // ─────────────────────────────────────────────────────────────────
+
+  /** Called once when a scan starts (before any session is executed) */
+  onScanStart?: (ctx: ScanContext) => Promise<void>;
+
+  /** Called once when a scan ends (after all sessions have executed) */
+  onScanEnd?: (result: RunResult, ctx: ScanContext) => Promise<RunResult>;
+
+  // ─────────────────────────────────────────────────────────────────
+  // Running Phase (per session)
   // ─────────────────────────────────────────────────────────────────
 
   /** Called when run starts */
@@ -225,6 +235,20 @@ export interface RunContext extends PluginContext {
 
   /** Whether running headless */
   headless: boolean;
+}
+
+/**
+ * Context for scan-level hooks (wraps all sessions)
+ */
+export interface ScanContext extends PluginContext {
+  /** All sessions in this scan */
+  sessions: Session[];
+
+  /** Whether running headless */
+  headless: boolean;
+
+  /** Total sessions count */
+  sessionCount: number;
 }
 
 /**

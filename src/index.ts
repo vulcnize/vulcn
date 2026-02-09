@@ -1,12 +1,14 @@
 /**
  * @vulcn/engine - Core security testing engine
  *
- * v0.3.0: Driver-based architecture
+ * v0.7.0: Driver-based architecture + Auth + Session v2
  *
  * The engine now provides:
  * - Driver system for different recording targets (browser, api, cli)
  * - Plugin system for payloads and detection
  * - Generic session format
+ * - Credential encryption & auth state management
+ * - Session format v2 (.vulcn/ directory)
  *
  * Drivers handle:
  * - Recording interactions (RecorderDriver)
@@ -55,12 +57,47 @@ export type {
   PluginContext,
   RecordContext,
   RunContext as PluginRunContext,
+  ScanContext,
   DetectContext,
   LoadedPlugin as LoadedPluginInfo,
   PluginLogger,
   EngineInfo,
   PluginSource,
 } from "./plugin-types";
+
+// ============================================================================
+// Auth System
+// ============================================================================
+
+export {
+  encrypt,
+  decrypt,
+  encryptCredentials,
+  decryptCredentials,
+  encryptStorageState,
+  decryptStorageState,
+  getPassphrase,
+} from "./auth";
+export type {
+  FormCredentials,
+  HeaderCredentials,
+  Credentials,
+  AuthConfig,
+} from "./auth";
+
+// ============================================================================
+// Session Format v2
+// ============================================================================
+
+export {
+  loadSessionDir,
+  saveSessionDir,
+  isSessionDir,
+  looksLikeSessionDir,
+  readAuthState,
+  readCapturedRequests,
+} from "./session";
+export type { ScanManifest, SessionRef, CapturedRequest } from "./session";
 
 // ============================================================================
 // Payload Types

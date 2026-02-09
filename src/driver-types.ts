@@ -134,6 +134,9 @@ export interface CrawlOptions {
   /** Only crawl pages under the same origin (default: true) */
   sameOrigin?: boolean;
 
+  /** Playwright storage state JSON for authenticated crawling */
+  storageState?: string;
+
   /** Callback when a page is crawled */
   onPageCrawled?: (url: string, formsFound: number) => void;
 }
