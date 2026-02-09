@@ -434,7 +434,11 @@ function vulcnExec(args: string[]) {
     cwd: ROOT,
     stdio: "pipe",
     timeout: 120_000, // 2 min per command
-    env: { ...process.env, FORCE_COLOR: "0" },
+    env: {
+      ...process.env,
+      FORCE_COLOR: "0",
+      VULCN_KEY: process.env.VULCN_KEY ?? "benchmark",
+    },
   };
 
   try {
