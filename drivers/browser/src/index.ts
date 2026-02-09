@@ -135,7 +135,7 @@ const recorderDriver: RecorderDriver = {
     options: CrawlOptions,
   ): Promise<Session[]> {
     const parsedConfig = configSchema.parse(config);
-    return crawlAndBuildSessions(
+    const result = await crawlAndBuildSessions(
       {
         startUrl: parsedConfig.startUrl ?? "",
         browser: parsedConfig.browser,
@@ -144,6 +144,9 @@ const recorderDriver: RecorderDriver = {
       },
       options,
     );
+    // The driver interface expects Session[] — CapturedRequests are
+    // available separately via crawlAndBuildSessions() for Tier 1.
+    return result.sessions;
   },
 };
 
@@ -176,6 +179,13 @@ export default browserDriver;
 export { BrowserRecorder } from "./recorder";
 export { BrowserRunner } from "./runner";
 export { crawlAndBuildSessions } from "./crawler";
+export type { CrawlResult } from "./crawler";
+export { httpScan, buildCapturedRequests } from "./http-scanner";
+export type {
+  HttpScanResult,
+  HttpScanOptions,
+  ReflectedRequest,
+} from "./http-scanner";
 export { launchBrowser, checkBrowsers, installBrowsers } from "./browser";
 export { detectLoginForm, performLogin, checkSessionAlive } from "./auth";
 export type { LoginForm, LoginResult } from "./auth";
