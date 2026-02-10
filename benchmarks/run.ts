@@ -268,7 +268,7 @@ async function runTarget(target: GroundTruthTarget): Promise<TargetResult> {
 
     // Step 2: Run scan with payloads
     console.log("   🔍 Scanning...");
-    const reportPath = resolve(sessionDir, "report.json");
+    const reportDir = resolve(sessionDir, "report");
 
     vulcnExec([
       "run",
@@ -280,11 +280,13 @@ async function runTarget(target: GroundTruthTarget): Promise<TargetResult> {
       "-r",
       "json",
       "--report-output",
-      reportPath,
+      reportDir,
       "--headless",
     ]);
 
     // Step 3: Read findings
+    // The report plugin writes to <reportDir>/vulcn-report.json
+    const reportPath = resolve(reportDir, "vulcn-report.json");
     let findings: Finding[] = [];
     try {
       const report = JSON.parse(readFileSync(reportPath, "utf-8"));
@@ -435,7 +437,7 @@ function vulcnExec(args: string[]) {
   const opts: ExecSyncOptions = {
     cwd: ROOT,
     stdio: "pipe",
-    timeout: 120_000, // 2 min per command
+    timeout: 300_000, // 5 min per command (scans can be slow on CI)
     env: {
       ...process.env,
       FORCE_COLOR: "0",
@@ -447,8 +449,18 @@ function vulcnExec(args: string[]) {
     const result = execSync(cmd, opts);
     return result.toString();
   } catch (error: unknown) {
+    const err = error as {
+      stderr?: Buffer;
+      stdout?: Buffer;
+      status?: number;
+      message?: string;
+    };
+    // vulcn run exits with code 1 when findings are detected (by design for CI)
+    // That's actually success for benchmarking — we want findings!
+    if (err.status === 1 && args[0] === "run") {
+      return err.stdout?.toString() ?? "";
+    }
     // Show full stderr for debugging
-    const err = error as { stderr?: Buffer; stdout?: Buffer; message?: string };
     const stderr = err.stderr?.toString().trim() ?? "";
     const stdout = err.stdout?.toString().trim() ?? "";
     const output = stderr || stdout || err.message || String(error);
