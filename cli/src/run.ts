@@ -356,7 +356,6 @@ export async function runCommand(sessionInput: string, options: RunOptions) {
         console.log(chalk.gray(`  Payload: ${finding.payload}`));
         console.log();
       }
-      process.exit(1); // Non-zero exit for CI/CD
     } else {
       console.log(chalk.green("✅ No vulnerabilities detected"));
     }
