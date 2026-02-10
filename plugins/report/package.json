@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/plugin-report",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Security report generation plugin for Vulcn — produces HTML dashboards, JSON, YAML, and SARIF v2.1.0 reports for GitHub Code Scanning and CI/CD integration.",
   "type": "module",
   "main": "dist/index.cjs",
