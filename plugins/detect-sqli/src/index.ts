@@ -24,6 +24,7 @@ import { z } from "zod";
 import type {
   VulcnPlugin,
   PluginContext,
+  PluginRunContext,
   DetectContext,
   Finding,
 } from "@vulcn/engine";
@@ -300,16 +301,23 @@ function isTimingPayload(payload: string): boolean {
 // ── Plugin ─────────────────────────────────────────────────────────────
 
 /**
- * State tracked per step for response diffing
+ * State tracked per step for response diffing and baseline comparison
  */
-const responseCache = new Map<
-  string,
-  {
-    statusCode: number;
-    bodyLength: number;
-    responseTime: number;
-  }
->();
+interface ResponseBaseline {
+  statusCode: number;
+  bodyLength: number;
+  responseTime: number;
+  /** SQL error patterns that exist in the CLEAN (uninjected) page */
+  baselineErrors: Set<string>;
+}
+
+const responseCache = new Map<string, ResponseBaseline>();
+
+/**
+ * Cache of baseline page content per step.
+ * Captured before any payload is injected.
+ */
+const baselineContentCache = new Map<string, string>();
 
 const plugin: VulcnPlugin = {
   name: "@vulcn/plugin-detect-sqli",
@@ -330,10 +338,51 @@ const plugin: VulcnPlugin = {
     },
 
     /**
+     * Capture baseline page content BEFORE any payloads are injected.
+     * This lets us know which SQL error patterns are "normal" for the page
+     * so we can skip them during detection (avoid false positives from
+     * pages that intentionally display SQL error messages).
+     */
+    onRunStart: async (ctx: PluginRunContext): Promise<void> => {
+      try {
+        const page = ctx.page as Page;
+        const content = await page.content();
+        const sessionKey = ctx.session.name ?? "default";
+        baselineContentCache.set(sessionKey, content);
+
+        // Pre-compute which error patterns match the clean page
+        const baselineErrors = new Set<string>();
+        for (const pattern of SQL_ERROR_PATTERNS) {
+          if (pattern.pattern.test(content)) {
+            baselineErrors.add(pattern.db + ":" + pattern.description);
+          }
+        }
+
+        // Store baseline errors globally for this session —
+        // all steps in this session will use the same baseline
+        responseCache.set(`${sessionKey}:errors`, {
+          statusCode: 0,
+          bodyLength: content.length,
+          responseTime: Date.now(),
+          baselineErrors,
+        });
+
+        if (baselineErrors.size > 0) {
+          ctx.logger.debug(
+            `Baseline has ${baselineErrors.size} pre-existing SQL error pattern(s) — will not flag these`,
+          );
+        }
+      } catch {
+        // Page not ready yet
+      }
+    },
+
+    /**
      * After each payload injection, check for SQLi indicators.
      *
      * This is the main detection hook. It:
      * 1. Reads the page content and checks for SQL error patterns
+     *    (skipping patterns that already exist in the baseline)
      * 2. Compares response characteristics to baseline
      * 3. Checks timing for SLEEP-based payloads
      */
@@ -341,6 +390,11 @@ const plugin: VulcnPlugin = {
       const config = configSchema.parse(ctx.config);
       const findings: Finding[] = [];
       const page = ctx.page as Page;
+
+      // Collect baseline errors for this step (captured by onNetworkResponse)
+      const cacheKey = `${ctx.stepId}:baseline`;
+      const baselineEntry = responseCache.get(cacheKey);
+      const baselineErrors = baselineEntry?.baselineErrors ?? new Set<string>();
 
       try {
         const url = page.url();
@@ -353,6 +407,7 @@ const plugin: VulcnPlugin = {
             ctx,
             config.errorSeverity,
             url,
+            baselineErrors,
           );
           findings.push(...errorFindings);
         }
@@ -385,14 +440,55 @@ const plugin: VulcnPlugin = {
       ctx: DetectContext,
     ): Promise<Finding | null> => {
       const config = configSchema.parse(ctx.config);
+      const response = rawResponse as PlaywrightResponse;
+      const url = response.url();
+      const status = response.status();
 
+      // ── Baseline Mode ─────────────────────────────────────────────
+      // If we are merely navigating to the clean URL to establish a baseline,
+      // we accumulate any SQL errors we see into the baseline cache.
+      // We NEVER report findings in this mode.
+      if (ctx.payloadValue === "__baseline__") {
+        try {
+          // Only process potential HTML/API responses
+          if (isStaticAsset(url)) return null;
+
+          const body = await response.text();
+          const foundErrors = new Set<string>();
+          for (const pattern of SQL_ERROR_PATTERNS) {
+            if (pattern.pattern.test(body)) {
+              foundErrors.add(pattern.db + ":" + pattern.description);
+            }
+          }
+
+          const cacheKey = `${ctx.stepId}:baseline`;
+          const existing = responseCache.get(cacheKey);
+          const mergedErrors = existing
+            ? new Set([...existing.baselineErrors, ...foundErrors])
+            : foundErrors;
+
+          responseCache.set(cacheKey, {
+            statusCode: status,
+            bodyLength: body.length,
+            responseTime: Date.now(),
+            baselineErrors: mergedErrors,
+          });
+
+          if (foundErrors.size > 0) {
+            ctx.logger.debug(
+              `Accumulated ${foundErrors.size} baseline errors from ${url}`,
+            );
+          }
+        } catch {
+          // Body access failed
+        }
+        return null;
+      }
+
+      // ── Detection Mode ────────────────────────────────────────────
       if (!config.detectErrors) return null;
 
       try {
-        const response = rawResponse as PlaywrightResponse;
-        const url = response.url();
-        const status = response.status();
-
         // Only check responses that look like they came from the target
         // Skip static assets
         if (isStaticAsset(url)) return null;
@@ -402,11 +498,28 @@ const plugin: VulcnPlugin = {
         if (!responseCache.has(cacheKey)) {
           try {
             const body = await response.text();
+
+            // Scan the FIRST (clean) response for pre-existing SQL error patterns.
+            // These are NOT caused by injection — they're part of the normal page.
+            const baselineErrors = new Set<string>();
+            for (const pattern of SQL_ERROR_PATTERNS) {
+              if (pattern.pattern.test(body)) {
+                baselineErrors.add(pattern.db + ":" + pattern.description);
+              }
+            }
+
             responseCache.set(cacheKey, {
               statusCode: status,
               bodyLength: body.length,
               responseTime: Date.now(),
+              baselineErrors,
             });
+
+            if (baselineErrors.size > 0) {
+              ctx.logger.debug(
+                `Baseline response has ${baselineErrors.size} pre-existing SQL error pattern(s)`,
+              );
+            }
           } catch {
             // Response body not available
           }
@@ -417,11 +530,13 @@ const plugin: VulcnPlugin = {
         if (status >= config.errorStatusThreshold) {
           try {
             const body = await response.text();
+            const stepBaseline = responseCache.get(cacheKey);
             const errorFindings = detectSqlErrors(
               body,
               ctx,
               config.errorSeverity,
               url,
+              stepBaseline?.baselineErrors,
             );
             if (errorFindings.length > 0) {
               return errorFindings[0]; // Return first match
@@ -439,6 +554,7 @@ const plugin: VulcnPlugin = {
 
     onDestroy: async () => {
       responseCache.clear();
+      baselineContentCache.clear();
     },
   },
 };
@@ -453,11 +569,18 @@ function detectSqlErrors(
   ctx: DetectContext,
   severity: "critical" | "high" | "medium" | "low",
   url: string,
+  baselineErrors: Set<string> = new Set(),
 ): Finding[] {
   const findings: Finding[] = [];
   const matched = new Set<string>();
 
   for (const pattern of SQL_ERROR_PATTERNS) {
+    const patternKey = pattern.db + ":" + pattern.description;
+
+    // Skip patterns that already existed in the clean (baseline) page.
+    // These are NOT caused by injection — they're normal page content.
+    if (baselineErrors.has(patternKey)) continue;
+
     if (pattern.pattern.test(content) && !matched.has(pattern.db)) {
       matched.add(pattern.db);
 
@@ -476,6 +599,7 @@ function detectSqlErrors(
 
       findings.push({
         type: "sqli",
+        cwe: "CWE-89",
         severity,
         title: `SQL Injection: ${pattern.db} error detected`,
         description: `${pattern.description}. The injected payload caused a ${pattern.db} database error to appear in the response, indicating the input is being used in SQL queries without proper sanitization.`,
@@ -510,6 +634,8 @@ async function detectResponseDiff(
 
   if (!baseline) return findings;
 
+  const baselineErrors = baseline.baselineErrors;
+
   try {
     const content = await page.content();
     const currentLength = content.length;
@@ -521,15 +647,21 @@ async function detectResponseDiff(
 
     if (lengthRatio > 0.5 && lengthDelta > 500) {
       // Check if the new content has SQL-related errors
-      const hasErrors = SQL_ERROR_PATTERNS.some((p) => p.pattern.test(content));
+      // that were NOT already present in the baseline
+      const hasNewErrors = SQL_ERROR_PATTERNS.some((p) => {
+        const patternKey = p.db + ":" + p.description;
+        if (baselineErrors.has(patternKey)) return false; // Skip pre-existing
+        return p.pattern.test(content);
+      });
 
-      if (hasErrors) {
+      if (hasNewErrors) {
         ctx.logger.info(
           `🚨 SQLi DETECTED (diff): Response body changed by ${Math.round(lengthRatio * 100)}% with SQL errors`,
         );
 
         findings.push({
           type: "sqli",
+          cwe: "CWE-89",
           severity: config.diffSeverity,
           title: "SQL Injection: Response anomaly with SQL errors",
           description: `The injected payload caused a significant change in response (${Math.round(lengthRatio * 100)}% size delta) with SQL error patterns present, suggesting injection vulnerability.`,
@@ -580,6 +712,7 @@ function detectTimingAnomaly(
 
     findings.push({
       type: "sqli",
+      cwe: "CWE-89",
       severity: config.timingSeverity,
       title: "SQL Injection: Timing anomaly detected (blind SQLi)",
       description: `The response took ${elapsed}ms after injecting a timing payload (SLEEP/WAITFOR). This exceeds the ${config.timingThresholdMs}ms threshold, indicating the SQL command was executed by the database.`,

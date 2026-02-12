@@ -558,6 +558,7 @@ const plugin: VulcnPlugin = {
                     reportedFindings.add(key);
                     ctx.addFinding({
                       type: "security-misconfiguration",
+                      cwe: check.cwe,
                       severity: config.headerSeverity,
                       title: check.title,
                       description: check.description,
@@ -582,6 +583,7 @@ const plugin: VulcnPlugin = {
                       reportedFindings.add(key);
                       ctx.addFinding({
                         type: "security-misconfiguration",
+                        cwe: check.cwe,
                         severity: config.headerSeverity,
                         title: `Weak ${check.header}`,
                         description: issue,
@@ -621,6 +623,7 @@ const plugin: VulcnPlugin = {
                     reportedFindings.add(key);
                     ctx.addFinding({
                       type: "security-misconfiguration",
+                      cwe: "CWE-614",
                       severity: config.cookieSeverity,
                       title: `Cookie: ${issue.issue} — ${issue.cookie}`,
                       description: issue.description,
@@ -655,6 +658,7 @@ const plugin: VulcnPlugin = {
                   reportedFindings.add(key);
                   ctx.addFinding({
                     type: "information-disclosure",
+                    cwe: "CWE-200",
                     severity: config.infoLeakSeverity,
                     title: leak.title,
                     description: leak.description,
@@ -689,6 +693,7 @@ const plugin: VulcnPlugin = {
 
                   ctx.addFinding({
                     type: "security-misconfiguration",
+                    cwe: "CWE-942",
                     severity,
                     title: issue.title,
                     description: issue.description,
@@ -720,6 +725,7 @@ const plugin: VulcnPlugin = {
                   reportedFindings.add(key);
                   ctx.addFinding({
                     type: "security-misconfiguration",
+                    cwe: "CWE-311",
                     severity: config.mixedContentSeverity,
                     title: "Mixed Content: HTTP resource on HTTPS page",
                     description: `An HTTPS page loaded a resource over insecure HTTP. This allows attackers to intercept or modify the resource via man-in-the-middle attacks, potentially compromising the entire page.`,

@@ -24,7 +24,7 @@
 // Driver System
 // ============================================================================
 
-export { DriverManager, driverManager } from "./driver-manager";
+export { DriverManager, driverManager, ENGINE_VERSION } from "./driver-manager";
 export { DRIVER_API_VERSION } from "./driver-types";
 export type {
   VulcnDriver,
@@ -103,6 +103,7 @@ export type { ScanManifest, SessionRef, CapturedRequest } from "./session";
 // Payload Types
 // ============================================================================
 
+export { getSeverity } from "./payload-types";
 export type {
   PayloadCategory,
   PayloadSource,
@@ -110,6 +111,20 @@ export type {
   CustomPayload,
   CustomPayloadFile,
 } from "./payload-types";
+
+// ============================================================================
+// Error System
+// ============================================================================
+
+export {
+  VulcnError,
+  ErrorHandler,
+  ErrorSeverity,
+  fatal,
+  error,
+  warn,
+} from "./errors";
+export type { ErrorListener } from "./errors";
 
 // ============================================================================
 // Core Types

@@ -125,7 +125,9 @@ async function writeReports(
         }
       }
     } catch (err) {
-      logger.error(
+      // Report write/generation failure is critical — don't swallow.
+      // Let it propagate; the plugin-manager classifies onScanEnd as FATAL.
+      throw new Error(
         `Failed to generate ${fmt} report: ${err instanceof Error ? err.message : String(err)}`,
       );
     }

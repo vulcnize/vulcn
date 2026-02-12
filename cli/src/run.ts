@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { DriverManager, PluginManager } from "@vulcn/engine";
 import {
   loadSessionDir,
@@ -13,6 +12,7 @@ import type { Session } from "@vulcn/engine";
 import browserDriver from "@vulcn/driver-browser";
 import chalk from "chalk";
 import ora from "ora";
+import { performAuth } from "./auth-helper";
 
 interface RunOptions {
   payload?: string[];
@@ -88,159 +88,52 @@ export async function runCommand(sessionInput: string, options: RunOptions) {
   }
 
   // Handle --creds for authentication (works for both v2 and legacy sessions)
-  if (!storageState && options.creds && existsSync(options.creds)) {
-    const authSpinner = ora("Authenticating...").start();
-    try {
-      const encrypted = await readFile(options.creds, "utf-8");
-      const passphrase = getPassphrase();
-      const { decryptCredentials } = await import("@vulcn/engine");
-      const credentials = decryptCredentials(encrypted, passphrase);
+  let extraHeaders: Record<string, string> | undefined;
 
-      if (credentials.type === "form") {
-        const { launchBrowser, performLogin } =
-          await import("@vulcn/driver-browser");
-
-        const { browser } = await launchBrowser({
-          browser: options.browser as "chromium" | "firefox" | "webkit",
-          headless: options.headless,
-        });
-
-        const context = await browser.newContext();
-        const page = await context.newPage();
-
-        // Determine target URL from the first session's navigate step
-        const firstNav = sessions[0].steps.find(
-          (s) => s.type === "browser.navigate",
-        );
-        const targetUrl =
-          (firstNav as { url?: string })?.url ?? "http://localhost";
-
-        const result = await performLogin(page, context, credentials, {
-          targetUrl,
-        });
-
-        if (result.success) {
-          storageState = result.storageState;
-          authSpinner.succeed(
-            `Authenticated as ${chalk.cyan(credentials.username)}`,
-          );
-        } else {
-          authSpinner.warn(
-            `Login failed: ${result.message} — scanning without auth`,
-          );
-        }
-
-        await page.close();
-        await context.close();
-        await browser.close();
-      } else if (credentials.type === "header") {
-        authSpinner.succeed("Loaded header credentials");
-        // TODO: inject headers into runner options
-      }
-    } catch (err) {
-      authSpinner.warn(`Auth failed: ${err} — scanning without auth`);
-    }
-  }
-
-  // Add payloads from custom file
-  if (options.payloadFile) {
-    const customSpinner = ora("Loading custom payloads...").start();
-    try {
-      const { loadFromFile } = await import("@vulcn/plugin-payloads");
-      const loaded = await loadFromFile(options.payloadFile);
-      manager.addPayloads(loaded);
-      customSpinner.succeed(
-        `Loaded ${chalk.cyan(loaded.length)} custom payload(s) from ${options.payloadFile}`,
-      );
-    } catch (err) {
-      customSpinner.fail(`Failed to load custom payloads: ${err}`);
-      process.exit(1);
-    }
-  }
-
-  // Load payload types from --payload flag
-  if (options.payload && options.payload.length > 0) {
-    const payloadSpinner = ora("Fetching payloads...").start();
-    try {
-      const { loadPayloadBox } = await import("@vulcn/plugin-payloads");
-
-      for (const name of options.payload) {
-        payloadSpinner.text = `Fetching ${name}...`;
-        const payload = await loadPayloadBox(name);
-        manager.addPayloads([payload]);
-      }
-      payloadSpinner.succeed(
-        `Loaded ${options.payload.length} payload type(s)`,
-      );
-    } catch (err) {
-      payloadSpinner.fail(`Failed to load payloads: ${err}`);
-      process.exit(1);
-    }
-  }
-
-  // If no payloads loaded yet, default to XSS
-  if (manager.getPayloads().length === 0) {
-    const defaultSpinner = ora("Fetching default payloads (xss)...").start();
-    try {
-      const { loadPayloadBox } = await import("@vulcn/plugin-payloads");
-      const payload = await loadPayloadBox("xss");
-      manager.addPayloads([payload]);
-      defaultSpinner.succeed("Using default payloads: xss");
-    } catch (err) {
-      defaultSpinner.fail(`Failed to load default payloads: ${err}`);
-      process.exit(1);
-    }
-  }
-
-  // Auto-load XSS detection plugin
-  if (!manager.hasPlugin("@vulcn/plugin-detect-xss")) {
-    const detectSpinner = ora("Loading XSS detection plugin...").start();
-    try {
-      const detectXssPlugin = await import("@vulcn/plugin-detect-xss");
-      manager.addPlugin(detectXssPlugin.default);
-      detectSpinner.succeed("Loaded XSS detection plugin");
-    } catch (err) {
-      detectSpinner.fail(`Failed to load detect-xss plugin: ${err}`);
-    }
-  }
-
-  // Auto-load SQLi detection plugin when sqli payloads are used
-  const hasSqliPayloads = (options.payload ?? []).some((p) => {
-    const lower = p.toLowerCase();
-    return (
-      lower === "sqli" ||
-      lower === "sql" ||
-      lower === "sql-injection" ||
-      lower.includes("sql")
+  if (!storageState && options.creds) {
+    // Determine target URL from the first session's navigate step
+    const firstNav = sessions[0].steps.find(
+      (s) => s.type === "browser.navigate",
     );
-  });
-  if (hasSqliPayloads && !manager.hasPlugin("@vulcn/plugin-detect-sqli")) {
-    const sqliSpinner = ora("Loading SQLi detection plugin...").start();
-    try {
-      const detectSqliPlugin = await import("@vulcn/plugin-detect-sqli");
-      manager.addPlugin(detectSqliPlugin.default);
-      sqliSpinner.succeed("Loaded SQLi detection plugin");
-    } catch (err) {
-      sqliSpinner.fail(`Failed to load detect-sqli plugin: ${err}`);
+    const targetUrl = (firstNav as { url?: string })?.url ?? "http://localhost";
+
+    const auth = await performAuth({
+      credsFile: options.creds,
+      browser: options.browser,
+      headless: options.headless,
+      targetUrl,
+    });
+
+    if (auth.storageState) {
+      storageState = auth.storageState;
+    }
+    if (auth.extraHeaders) {
+      extraHeaders = auth.extraHeaders;
     }
   }
 
-  // Auto-load passive scanner plugin (enabled by default, disable with --no-passive)
-  if (
-    options.passive !== false &&
-    !manager.hasPlugin("@vulcn/plugin-passive")
-  ) {
-    const passiveSpinner = ora("Loading passive scanner plugin...").start();
-    try {
-      const passivePlugin = await import("@vulcn/plugin-passive");
-      manager.addPlugin(passivePlugin.default);
-      passiveSpinner.succeed("Loaded passive security scanner");
-    } catch (err) {
-      passiveSpinner.fail(`Failed to load passive scanner plugin: ${err}`);
-    }
+  // Load default payloads and detection plugins via core engine
+  const defaultsSpinner = ora(
+    "Loading payloads & detection plugins...",
+  ).start();
+  try {
+    await manager.loadDefaults(options.payload ?? [], {
+      passive: options.passive !== false,
+      payloadFile: options.payloadFile,
+    });
+    const payloadNames = manager
+      .getPayloads()
+      .map((p) => p.name)
+      .join(", ");
+    defaultsSpinner.succeed(
+      `Loaded payloads (${chalk.cyan(payloadNames)}) + detection plugins`,
+    );
+  } catch (err) {
+    defaultsSpinner.fail(`Failed to load defaults: ${err}`);
+    process.exit(1);
   }
 
-  // Load report plugin if --report is specified
+  // Load report plugin if --report is specified (CLI-specific concern)
   if (options.report) {
     const reportSpinner = ora("Loading report plugin...").start();
     try {
@@ -260,6 +153,7 @@ export async function runCommand(sessionInput: string, options: RunOptions) {
       );
     } catch (err) {
       reportSpinner.fail(`Failed to load report plugin: ${err}`);
+      process.exit(1);
     }
   }
 
@@ -307,22 +201,18 @@ export async function runCommand(sessionInput: string, options: RunOptions) {
 
     let result;
 
-    if (sessions.length === 1) {
-      // Single session — use execute() directly
-      result = await drivers.execute(sessions[0], manager, {
-        headless: options.headless,
-        ...(storageState ? { storageState } : {}),
-        onFinding,
-      });
-    } else {
-      // Multiple sessions — use executeScan() for shared browser
-      const scanResult = await drivers.executeScan(sessions, manager, {
-        headless: options.headless,
-        ...(storageState ? { storageState } : {}),
-        onFinding,
-      });
-      result = scanResult.aggregate;
-    }
+    // Always use executeScan — works for 1 or many sessions,
+    // ensures onSessionStart always fires for consistent UX
+    const scanResult = await drivers.executeScan(sessions, manager, {
+      headless: options.headless,
+      ...(storageState ? { storageState } : {}),
+      ...(extraHeaders ? { extraHeaders } : {}),
+      onFinding,
+      onSessionStart: (session: Session, index: number, total: number) => {
+        runSpinner.text = `Session ${index + 1}/${total} — ${session.name}`;
+      },
+    });
+    result = scanResult.aggregate;
 
     runSpinner.succeed("Tests completed");
     console.log();
@@ -372,9 +262,24 @@ export async function runCommand(sessionInput: string, options: RunOptions) {
         console.log(chalk.gray(`   ... and ${result.errors.length - 5} more`));
       }
     }
+
+    // Print error handler summary if there were issues
+    const errorHandler = manager.getErrorHandler();
+    if (errorHandler.hasErrors()) {
+      console.log();
+      console.log(chalk.yellow(errorHandler.getSummary()));
+    }
   } catch (err) {
     runSpinner.fail("Test execution failed");
     console.error(chalk.red(String(err)));
+
+    // Print error handler summary for context
+    const errorHandler = manager.getErrorHandler();
+    if (errorHandler.hasErrors()) {
+      console.log();
+      console.log(chalk.yellow(errorHandler.getSummary()));
+    }
+
     process.exit(1);
   }
 }

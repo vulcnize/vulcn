@@ -1,0 +1,37 @@
+# Benchmark Target Infrastructure
+#
+# Industry-standard benchmark targets only.
+# These are the same targets every DAST vendor scores against.
+#
+# Start:  docker compose -f benchmarks/docker-compose.yml up -d
+# Stop:   docker compose -f benchmarks/docker-compose.yml down
+# Status: docker compose -f benchmarks/docker-compose.yml ps
+
+services:
+  # ── WAVSEP — Most cited DAST benchmark ────────────────────────────────
+  # ~1,800 test cases across XSS, SQLi, LFI, RFI, redirect
+  # Ground truth: baked into URL structure (Detection-Evaluation = TP, FalsePositives = FP)
+  wavsep:
+    image: zaproxy/wavsep
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/wavsep/"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  # ── OWASP Benchmark — Gold standard ──────────────────────────────────
+  # 2,740 test cases, CWE-mapped, with official expectedresults CSV
+  # Every serious DAST vendor publishes scores against this
+  # owasp-benchmark:
+  #   image: owasp/benchmark
+  #   ports:
+  #     - "8443:8443"
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "-k", "https://localhost:8443/benchmark/"]
+  #     interval: 15s
+  #     timeout: 5s
+  #     retries: 20
+  #     start_period: 60s

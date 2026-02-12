@@ -10,6 +10,7 @@
 import type { z } from "zod";
 import type { Session, Step } from "./driver-types";
 import type { Finding } from "./types";
+import type { ErrorHandler } from "./errors";
 import type { RunResult } from "./driver-types";
 import type { RuntimePayload, PayloadCategory } from "./payload-types";
 
@@ -210,6 +211,14 @@ export interface PluginContext {
 
   /** Scoped logger */
   logger: PluginLogger;
+
+  /**
+   * Centralized error handler.
+   * Plugins MUST use this to surface errors instead of swallowing them:
+   *   ctx.errors.fatal("can't write report", "plugin:report", { cause: err })
+   *   ctx.errors.warn("optional feature unavailable", "plugin:passive")
+   */
+  errors: ErrorHandler;
 
   /** Fetch API for network requests */
   fetch: typeof fetch;

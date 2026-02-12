@@ -5,7 +5,7 @@
  * Uses Playwright to record and replay web application interactions.
  *
  * Step types:
- * - browser.navigate - Navigate to a URL
+ * - browser.navigate - Navigate to a URL (supports injectable URL params)
  * - browser.click - Click an element
  * - browser.input - Type into an input field
  * - browser.keypress - Press a key
@@ -25,11 +25,13 @@ import type {
   Step,
   RunContext,
   RunResult,
+  RunOptions,
 } from "@vulcn/engine";
 
 import { BrowserRecorder } from "./recorder";
 import { BrowserRunner } from "./runner";
 import { crawlAndBuildSessions } from "./crawler";
+import { launchBrowser } from "./browser";
 
 /**
  * Browser driver configuration schema
@@ -77,6 +79,12 @@ export const BrowserStepSchema = z.discriminatedUnion("type", [
     id: z.string(),
     type: z.literal("browser.navigate"),
     url: z.string(),
+    /** Mark this navigation as an injection point for a URL query parameter */
+    injectable: z.boolean().optional(),
+    /** The query parameter name to inject into (e.g., "userinput") */
+    parameter: z.string().optional(),
+    /** Default value of the parameter (replaced during payload cycling) */
+    value: z.string().optional(),
     timestamp: z.number(),
   }),
   z.object({
@@ -171,6 +179,21 @@ const browserDriver: VulcnDriver = {
   stepTypes: [...BROWSER_STEP_TYPES],
   recorder: recorderDriver,
   runner: runnerDriver,
+
+  async createSharedResource(
+    config: Record<string, unknown>,
+    options: RunOptions,
+  ): Promise<unknown> {
+    const parsedConfig = configSchema.parse(config);
+    const headless = options.headless ?? parsedConfig.headless;
+
+    const result = await launchBrowser({
+      browser: parsedConfig.browser,
+      headless,
+    });
+
+    return result.browser;
+  },
 };
 
 export default browserDriver;

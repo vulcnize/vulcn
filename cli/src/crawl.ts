@@ -1,16 +1,11 @@
-import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { existsSync } from "node:fs";
-import {
-  DriverManager,
-  decryptCredentials,
-  getPassphrase,
-} from "@vulcn/engine";
-import type { Credentials, AuthConfig } from "@vulcn/engine";
+import { DriverManager } from "@vulcn/engine";
+import type { AuthConfig } from "@vulcn/engine";
 import { saveSessionDir } from "@vulcn/engine";
 import browserDriver from "@vulcn/driver-browser";
 import chalk from "chalk";
 import ora from "ora";
+import { performAuth } from "./auth-helper";
 
 interface CrawlOptions {
   output: string;
@@ -44,70 +39,23 @@ export async function crawlCommand(url: string, options: CrawlOptions) {
   // Handle authentication
   let storageState: string | undefined;
   let authConfig: AuthConfig | undefined;
-  let credentials: Credentials | undefined;
   let encryptedState: string | undefined;
 
-  const credsFile = options.creds ?? ".vulcn/auth.enc";
-  if (existsSync(credsFile)) {
-    const authSpinner = ora("Authenticating...").start();
-    try {
-      const encrypted = await readFile(credsFile, "utf-8");
-      encryptedState = encrypted;
-      let passphrase: string;
-      try {
-        passphrase = getPassphrase();
-      } catch {
-        authSpinner.fail(
-          "Credentials found but no passphrase. Set VULCN_KEY or use --passphrase.",
-        );
-        process.exit(1);
-      }
+  const auth = await performAuth({
+    credsFile: options.creds ?? ".vulcn/auth.enc",
+    browser: options.browser,
+    headless: options.headless,
+    targetUrl: url,
+  });
 
-      credentials = decryptCredentials(encrypted, passphrase);
-
-      if (credentials.type === "form") {
-        // Perform login to get storage state
-        const { launchBrowser } = await import("@vulcn/driver-browser");
-        const { performLogin } = await import("@vulcn/driver-browser");
-
-        const { browser } = await launchBrowser({
-          browser: options.browser as "chromium" | "firefox" | "webkit",
-          headless: options.headless,
-        });
-
-        const context = await browser.newContext();
-        const page = await context.newPage();
-
-        const result = await performLogin(page, context, credentials, {
-          targetUrl: url,
-        });
-
-        if (result.success) {
-          storageState = result.storageState;
-          authConfig = {
-            strategy: "storage-state",
-            loginUrl: credentials.loginUrl,
-          };
-          authSpinner.succeed(
-            `Authenticated as ${chalk.cyan(credentials.username)}`,
-          );
-        } else {
-          authSpinner.warn(
-            `Login failed: ${result.message} — crawling without auth`,
-          );
-        }
-
-        await page.close();
-        await context.close();
-        await browser.close();
-      } else if (credentials.type === "header") {
-        // Header auth — pass directly (will be injected into page requests)
-        authConfig = { strategy: "header" };
-        authSpinner.succeed("Loaded header credentials");
-      }
-    } catch (err) {
-      authSpinner.fail(`Auth failed: ${err}`);
-    }
+  if (auth.storageState) {
+    storageState = auth.storageState;
+  }
+  if (auth.authConfig) {
+    authConfig = auth.authConfig;
+  }
+  if (auth.encryptedState) {
+    encryptedState = auth.encryptedState;
   }
 
   if (storageState) {

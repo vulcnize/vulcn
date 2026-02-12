@@ -257,8 +257,10 @@ async function discoverForms(
           selector = `#${CSS.escape(el.id)}`;
         } else if (el.name) {
           selector = `form:nth-of-type(${formIndex + 1}) [name="${CSS.escape(el.name)}"]`;
+        } else if (el.tagName.toLowerCase() === "textarea") {
+          selector = `form:nth-of-type(${formIndex + 1}) textarea`;
         } else {
-          selector = `form:nth-of-type(${formIndex + 1}) ${el.tagName.toLowerCase()}:nth-of-type(${inputIndex + 1})`;
+          selector = `form:nth-of-type(${formIndex + 1}) input[type="${type}"]:nth-of-type(${inputIndex + 1})`;
         }
 
         inputs.push({
@@ -349,6 +351,8 @@ async function discoverForms(
         selector = `#${CSS.escape(el.id)}`;
       } else if (el.name) {
         selector = `[name="${CSS.escape(el.name)}"]`;
+      } else if (el.tagName.toLowerCase() === "textarea") {
+        selector = `textarea`;
       } else {
         selector = `${el.tagName.toLowerCase()}[type="${type}"]`;
       }
@@ -462,18 +466,74 @@ async function discoverLinks(
   sameOrigin: boolean,
 ): Promise<string[]> {
   const links = await page.evaluate(() => {
-    return Array.from(document.querySelectorAll("a[href]"))
-      .map((a) => (a as HTMLAnchorElement).href)
-      .filter((href) => href.startsWith("http"));
+    const found: string[] = [];
+
+    // 1. Standard <a href> links
+    for (const a of document.querySelectorAll("a[href]")) {
+      const href = (a as HTMLAnchorElement).href;
+      if (href.startsWith("http")) found.push(href);
+    }
+
+    // 2. URL-like text in the page body
+    //    Many apps list navigable paths as plain text (e.g., WAVSEP's index page
+    //    uses <b>active/index-xss.jsp</b> instead of proper links).
+    //    We extract text content that looks like relative or absolute paths.
+    const pathPattern =
+      /(?:^|\s)((?:\/[\w\-.]+)+(?:\.[\w]+)?(?:\?[^\s<]*)?|[\w\-./]+\.(?:jsp|php|html?|aspx?|do|action|cgi|py|rb|pl)(?:\?[^\s<]*)?)/gi;
+    const bodyText = document.body?.innerText ?? "";
+    let match;
+    while ((match = pathPattern.exec(bodyText)) !== null) {
+      const candidate = match[1].trim();
+      // Skip obvious non-URLs
+      if (candidate.length < 3) continue;
+      if (candidate.startsWith(".") && !candidate.startsWith("./")) continue;
+      found.push(candidate);
+    }
+
+    // 3. href/src attributes on any element (not just <a>)
+    //    Catches <frame src>, <area href>, etc.
+    for (const el of document.querySelectorAll("[href], [src]")) {
+      const val = el.getAttribute("href") || el.getAttribute("src") || "";
+      if (
+        val &&
+        !val.startsWith("javascript:") &&
+        !val.startsWith("#") &&
+        !val.startsWith("data:")
+      ) {
+        found.push(val);
+      }
+    }
+
+    return found;
   });
 
-  return links.filter((link) => {
+  // Resolve relative paths to full URLs using the page's current URL
+  const pageUrl = page.url();
+  const resolvedLinks: string[] = [];
+
+  for (const link of links) {
     try {
-      const linkOrigin = new URL(link).origin;
+      // Try resolving as relative to current page
+      const resolved = new URL(link, pageUrl).href;
+      resolvedLinks.push(resolved);
+    } catch {
+      // Not a valid URL — skip
+    }
+  }
+
+  // Deduplicate
+  const unique = [...new Set(resolvedLinks)];
+
+  return unique.filter((link) => {
+    try {
+      const parsed = new URL(link);
+      // Skip non-HTTP protocols
+      if (!parsed.protocol.startsWith("http")) return false;
       // Filter out links to different origins
-      if (sameOrigin && linkOrigin !== origin) return false;
+      if (sameOrigin && parsed.origin !== origin) return false;
       // Filter out redirect links that point to external URLs
       if (isExternalRedirectLink(link, origin)) return false;
+      // Skip anchors, mailto, tel, etc.
       return true;
     } catch {
       return false;

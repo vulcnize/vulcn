@@ -63,8 +63,10 @@ const plugin: VulcnPlugin = {
             loadedPayloads.push(payload);
             ctx.logger.debug(`Loaded payload type: ${type}`);
           } catch (err) {
-            ctx.logger.error(
-              `Failed to load "${type}": ${err instanceof Error ? err.message : String(err)}`,
+            // Payload loading failure is critical — if we can't load
+            // what was requested, the scan has no ammunition.
+            throw new Error(
+              `Failed to load payload type "${type}": ${err instanceof Error ? err.message : String(err)}`,
             );
           }
         }
@@ -79,8 +81,8 @@ const plugin: VulcnPlugin = {
             `Loaded ${filePayloads.length} payload sets from files`,
           );
         } catch (err) {
-          ctx.logger.error(
-            `Failed to load custom files: ${err instanceof Error ? err.message : String(err)}`,
+          throw new Error(
+            `Failed to load custom payload files: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
       }

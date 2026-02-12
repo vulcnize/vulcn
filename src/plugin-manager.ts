@@ -6,6 +6,7 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve, isAbsolute } from "node:path";
+import { createRequire } from "node:module";
 import YAML from "yaml";
 import { z } from "zod";
 import type {
@@ -22,9 +23,10 @@ import type {
 import { PLUGIN_API_VERSION } from "./plugin-types";
 import type { Finding } from "./types";
 import type { RuntimePayload } from "./payload-types";
+import { ErrorHandler, ErrorSeverity, VulcnError } from "./errors";
 
-// Package version (injected at build time or read from package.json)
-const ENGINE_VERSION = "0.2.0";
+const _require = createRequire(import.meta.url);
+const { version: ENGINE_VERSION } = _require("../package.json");
 
 /**
  * Config file schema
@@ -56,12 +58,22 @@ export class PluginManager {
   private plugins: LoadedPlugin[] = [];
   private config: VulcnConfig | null = null;
   private initialized = false;
+  private errorHandler: ErrorHandler;
 
   /**
    * Shared context passed to all plugins
    */
   private sharedPayloads: RuntimePayload[] = [];
   private sharedFindings: Finding[] = [];
+
+  constructor(errorHandler?: ErrorHandler) {
+    this.errorHandler = errorHandler ?? new ErrorHandler();
+  }
+
+  /** Get the error handler for post-run inspection */
+  getErrorHandler(): ErrorHandler {
+    return this.errorHandler;
+  }
 
   /**
    * Load configuration from vulcn.config.yml
@@ -112,10 +124,13 @@ export class PluginManager {
         const loaded = await this.loadPlugin(pluginConfig);
         this.plugins.push(loaded);
       } catch (err) {
-        console.error(
-          `Failed to load plugin ${pluginConfig.name}:`,
-          err instanceof Error ? err.message : String(err),
-        );
+        // Plugin from config failing to load is an ERROR — scan can
+        // proceed but the user explicitly asked for this plugin.
+        this.errorHandler.catch(err, {
+          severity: ErrorSeverity.ERROR,
+          source: `plugin-manager:load`,
+          context: { plugin: pluginConfig.name },
+        });
       }
     }
   }
@@ -243,6 +258,121 @@ export class PluginManager {
   }
 
   /**
+   * Load default payloads and detection plugins for common scanning.
+   *
+   * This encapsulates the orchestration logic that was previously duplicated
+   * in the CLI `run` command and the Worker `scanner`. Both now collapse
+   * to a single call:
+   *
+   *   await manager.loadDefaults(["xss", "sqli"], { passive: true });
+   *
+   * The method:
+   * 1. Loads requested payload types via @vulcn/plugin-payloads
+   * 2. Auto-loads matching detection plugins (xss → detect-xss, sqli → detect-sqli)
+   * 3. Optionally loads the passive security scanner
+   * 4. Falls back to ["xss"] if no payload types specified
+   */
+  async loadDefaults(
+    payloadTypes: string[] = [],
+    options: {
+      /** Load passive scanner plugin (default: true) */
+      passive?: boolean;
+      /** Custom payload file to load */
+      payloadFile?: string;
+    } = {},
+  ): Promise<void> {
+    const { passive = true, payloadFile } = options;
+    const types = payloadTypes.length > 0 ? payloadTypes : ["xss"];
+
+    // Load custom payloads from file if provided
+    if (payloadFile) {
+      try {
+        const payloadPkg = "@vulcn/plugin-payloads";
+        const { loadFromFile } = await import(/* @vite-ignore */ payloadPkg);
+        const loaded = await loadFromFile(payloadFile);
+        this.addPayloads(loaded);
+      } catch (err) {
+        throw new Error(
+          `Failed to load custom payloads from ${payloadFile}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    // Load payload types
+    try {
+      const payloadPkg = "@vulcn/plugin-payloads";
+      const { loadPayloadBox } = await import(/* @vite-ignore */ payloadPkg);
+      for (const name of types) {
+        const payload = await loadPayloadBox(name);
+        this.addPayloads([payload]);
+      }
+    } catch (err) {
+      throw new Error(
+        `Failed to load payloads: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    // Auto-load XSS detection plugin
+    if (
+      types.some((t) => t.toLowerCase() === "xss") &&
+      !this.hasPlugin("@vulcn/plugin-detect-xss")
+    ) {
+      try {
+        const pkg = "@vulcn/plugin-detect-xss";
+        const mod = await import(/* @vite-ignore */ pkg);
+        this.addPlugin(mod.default);
+      } catch (err) {
+        this.errorHandler.catch(err, {
+          severity: ErrorSeverity.WARN,
+          source: "plugin-manager:auto-load",
+          context: { plugin: "@vulcn/plugin-detect-xss" },
+        });
+      }
+    }
+
+    // Auto-load SQLi detection plugin
+    if (
+      types.some((t) => {
+        const lower = t.toLowerCase();
+        return (
+          lower === "sqli" ||
+          lower === "sql" ||
+          lower === "sql-injection" ||
+          lower.includes("sql")
+        );
+      }) &&
+      !this.hasPlugin("@vulcn/plugin-detect-sqli")
+    ) {
+      try {
+        const pkg = "@vulcn/plugin-detect-sqli";
+        const mod = await import(/* @vite-ignore */ pkg);
+        this.addPlugin(mod.default);
+      } catch (err) {
+        this.errorHandler.catch(err, {
+          severity: ErrorSeverity.WARN,
+          source: "plugin-manager:auto-load",
+          context: { plugin: "@vulcn/plugin-detect-sqli" },
+        });
+      }
+    }
+
+    // Auto-load passive scanner (opt-out)
+    if (passive && !this.hasPlugin("@vulcn/plugin-passive")) {
+      try {
+        const pkg = "@vulcn/plugin-passive";
+        const mod = await import(/* @vite-ignore */ pkg);
+        this.addPlugin(mod.default);
+      } catch (err) {
+        this.errorHandler.catch(err, {
+          severity: ErrorSeverity.WARN,
+          source: "plugin-manager:auto-load",
+          context: { plugin: "@vulcn/plugin-passive" },
+        });
+      }
+    }
+  }
+
+  /**
    * Get all loaded payloads
    */
   getPayloads(): RuntimePayload[] {
@@ -294,7 +424,10 @@ export class PluginManager {
   /**
    * Create base context for plugins
    */
-  createContext(pluginConfig: Record<string, unknown>): PluginContext {
+  createContext(
+    pluginConfig: Record<string, unknown>,
+    pluginName?: string,
+  ): PluginContext {
     const engineInfo: EngineInfo = {
       version: ENGINE_VERSION,
       pluginApiVersion: PLUGIN_API_VERSION,
@@ -306,9 +439,13 @@ export class PluginManager {
       payloads: this.sharedPayloads,
       findings: this.sharedFindings,
       addFinding: (finding: Finding) => {
+        console.log(
+          `[DEBUG-PM] Plugin ${pluginName || "?"} adding finding: ${finding.type}`,
+        );
         this.sharedFindings.push(finding);
       },
-      logger: this.createLogger("plugin"),
+      logger: this.createLogger(pluginName || "plugin"),
+      errors: this.errorHandler,
       fetch: globalThis.fetch,
     };
   }
@@ -326,6 +463,29 @@ export class PluginManager {
     };
   }
 
+  // ── Hook severity classification ────────────────────────────────────
+  //
+  // Hooks that produce OUTPUT (reports, results) are FATAL on failure.
+  // Hooks that set up state are ERROR. Everything else is WARN.
+  //
+  private static readonly FATAL_HOOKS: Set<keyof PluginHooks> = new Set([
+    "onRunEnd",
+    "onScanEnd",
+  ]);
+
+  private static readonly ERROR_HOOKS: Set<keyof PluginHooks> = new Set([
+    "onInit",
+    "onRunStart",
+    "onScanStart",
+    "onAfterPayload",
+  ]);
+
+  private hookSeverity(hookName: keyof PluginHooks): ErrorSeverity {
+    if (PluginManager.FATAL_HOOKS.has(hookName)) return ErrorSeverity.FATAL;
+    if (PluginManager.ERROR_HOOKS.has(hookName)) return ErrorSeverity.ERROR;
+    return ErrorSeverity.WARN;
+  }
+
   /**
    * Call a hook on all plugins sequentially
    */
@@ -339,15 +499,16 @@ export class PluginManager {
     for (const loaded of this.plugins) {
       const hook = loaded.plugin.hooks?.[hookName];
       if (hook) {
-        const ctx = this.createContext(loaded.config);
+        const ctx = this.createContext(loaded.config, loaded.plugin.name);
         ctx.logger = this.createLogger(loaded.plugin.name);
         try {
           await executor(hook as NonNullable<PluginHooks[K]>, ctx);
         } catch (err) {
-          console.error(
-            `Error in plugin ${loaded.plugin.name}.${hookName}:`,
-            err instanceof Error ? err.message : String(err),
-          );
+          this.errorHandler.catch(err, {
+            severity: this.hookSeverity(hookName),
+            source: `plugin:${loaded.plugin.name}`,
+            context: { hook: hookName },
+          });
         }
       }
     }
@@ -368,7 +529,7 @@ export class PluginManager {
     for (const loaded of this.plugins) {
       const hook = loaded.plugin.hooks?.[hookName];
       if (hook) {
-        const ctx = this.createContext(loaded.config);
+        const ctx = this.createContext(loaded.config, loaded.plugin.name);
         ctx.logger = this.createLogger(loaded.plugin.name);
         try {
           const result = await executor(
@@ -383,10 +544,11 @@ export class PluginManager {
             }
           }
         } catch (err) {
-          console.error(
-            `Error in plugin ${loaded.plugin.name}.${hookName}:`,
-            err instanceof Error ? err.message : String(err),
-          );
+          this.errorHandler.catch(err, {
+            severity: this.hookSeverity(hookName),
+            source: `plugin:${loaded.plugin.name}`,
+            context: { hook: hookName },
+          });
         }
       }
     }
@@ -411,7 +573,7 @@ export class PluginManager {
     for (const loaded of this.plugins) {
       const hook = loaded.plugin.hooks?.[hookName];
       if (hook) {
-        const ctx = this.createContext(loaded.config);
+        const ctx = this.createContext(loaded.config, loaded.plugin.name);
         ctx.logger = this.createLogger(loaded.plugin.name);
         try {
           value = await executor(
@@ -420,10 +582,11 @@ export class PluginManager {
             ctx,
           );
         } catch (err) {
-          console.error(
-            `Error in plugin ${loaded.plugin.name}.${hookName}:`,
-            err instanceof Error ? err.message : String(err),
-          );
+          this.errorHandler.catch(err, {
+            severity: this.hookSeverity(hookName),
+            source: `plugin:${loaded.plugin.name}`,
+            context: { hook: hookName },
+          });
         }
       }
     }

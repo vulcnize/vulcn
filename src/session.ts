@@ -14,6 +14,7 @@
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, basename, extname } from "node:path";
+import { createHash } from "node:crypto";
 import { parse, stringify } from "yaml";
 import type { Session } from "./driver-types";
 import type { AuthConfig } from "./auth";
@@ -349,11 +350,26 @@ function resolveUrl(target: string, page?: string): string {
 
 /**
  * Convert a string to a safe filename slug.
+ *
+ * Appends a short hash of the full text to guarantee uniqueness,
+ * even when names share long common prefixes (e.g., WAVSEP test cases).
+ * The readable portion is truncated to fit within maxLen.
  */
-function slugify(text: string): string {
-  return text
+function slugify(text: string, maxLen = 80): string {
+  const slug = text
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60);
+    .replace(/^-+|-+$/g, "");
+
+  // Short hash for uniqueness (8 hex chars = 4 bytes, ~4B combinations)
+  const hash = createHash("sha256").update(text).digest("hex").slice(0, 8);
+
+  // If slug + hash fits, use it as-is
+  const withHash = `${slug}-${hash}`;
+  if (withHash.length <= maxLen) return withHash;
+
+  // Truncate the slug (keep tail — most unique part) and append hash
+  const maxSlugLen = maxLen - hash.length - 1; // -1 for the separator
+  const truncated = slug.slice(-maxSlugLen).replace(/^-+/, "");
+  return `${truncated}-${hash}`;
 }

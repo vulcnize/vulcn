@@ -73,3 +73,9 @@ test-results/
 
 # Secrets baseline (if using detect-secrets)
 # .secrets.baseline
+
+# Benchmark artifacts (generated sessions & results)
+benchmarks/results/
+benchmarks/wavsep/results/
+benchmarks/wavsep/sessions.vulcn/
+benchmarks/ground-truth/*.json
