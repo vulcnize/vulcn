@@ -38,7 +38,10 @@
     "changeset": "changeset",
     "release:version": "changeset version",
     "release:publish": "pnpm build && changeset publish",
-    "release:check": "pnpm check && pnpm test:coverage"
+    "release:check": "pnpm check && pnpm test:coverage",
+    "benchmark": "tsx benchmarks/bench.ts",
+    "benchmark:verbose": "tsx benchmarks/bench.ts --verbose",
+    "benchmark:json": "tsx benchmarks/bench.ts --json benchmarks/results/latest.json --verbose"
   },
   "keywords": [
     "vulcn",
@@ -88,6 +91,7 @@
     "oxlint": "^0.15.0",
     "prettier": "^3.4.0",
     "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
   }

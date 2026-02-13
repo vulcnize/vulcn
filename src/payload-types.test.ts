@@ -6,6 +6,7 @@ import type {
   CustomPayload,
   CustomPayloadFile,
 } from "../src/payload-types";
+import { getSeverity } from "../src/payload-types";
 
 describe("Payload Types", () => {
   it("should define valid PayloadCategory values", () => {
@@ -26,8 +27,13 @@ describe("Payload Types", () => {
   });
 
   it("should define valid PayloadSource values", () => {
-    const sources: PayloadSource[] = ["custom", "payloadbox", "plugin"];
-    expect(sources).toHaveLength(3);
+    const sources: PayloadSource[] = [
+      "curated",
+      "custom",
+      "payloadbox",
+      "plugin",
+    ];
+    expect(sources).toHaveLength(4);
   });
 
   it("should allow creating RuntimePayload objects", () => {
@@ -74,5 +80,36 @@ describe("Payload Types", () => {
 
     expect(file.version).toBe("1");
     expect(file.payloads).toHaveLength(1);
+  });
+});
+
+describe("getSeverity", () => {
+  it("should return critical for sqli, command-injection, xxe", () => {
+    expect(getSeverity("sqli")).toBe("critical");
+    expect(getSeverity("command-injection")).toBe("critical");
+    expect(getSeverity("xxe")).toBe("critical");
+  });
+
+  it("should return high for xss, ssrf, path-traversal", () => {
+    expect(getSeverity("xss")).toBe("high");
+    expect(getSeverity("ssrf")).toBe("high");
+    expect(getSeverity("path-traversal")).toBe("high");
+  });
+
+  it("should return medium for open-redirect", () => {
+    expect(getSeverity("open-redirect")).toBe("medium");
+  });
+
+  it("should return low for security-misconfiguration", () => {
+    expect(getSeverity("security-misconfiguration")).toBe("low");
+  });
+
+  it("should return info for information-disclosure", () => {
+    expect(getSeverity("information-disclosure")).toBe("info");
+  });
+
+  it("should return medium for custom/unknown categories", () => {
+    expect(getSeverity("custom")).toBe("medium");
+    expect(getSeverity("reflection")).toBe("medium");
   });
 });

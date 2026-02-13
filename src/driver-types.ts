@@ -13,6 +13,7 @@ import type { z } from "zod";
 import type { Finding } from "./types";
 import type { RuntimePayload } from "./payload-types";
 import type { PluginManager } from "./plugin-manager";
+import type { ErrorHandler } from "./errors";
 
 /**
  * Current driver API version
@@ -96,6 +97,14 @@ export interface RunContext {
   /** Logger */
   logger: DriverLogger;
 
+  /**
+   * Centralized error handler.
+   * Drivers MUST use this to surface errors:
+   *   ctx.errors.fatal("session data malformed", "driver:browser")
+   *   ctx.errors.warn("page timeout", "driver:browser")
+   */
+  errors: ErrorHandler;
+
   /** Running options */
   options: RunOptions;
 }
@@ -155,6 +164,23 @@ export interface RunOptions {
   onStepComplete?: (stepId: string, payloadCount: number) => void;
 
   /**
+   * Called by executeScan before each session starts.
+   * Provides the session name, index, and total count for progress tracking.
+   */
+  onSessionStart?: (session: Session, index: number, total: number) => void;
+
+  /**
+   * Called by executeScan after each session completes.
+   * Provides the result for that session.
+   */
+  onSessionEnd?: (
+    session: Session,
+    result: RunResult,
+    index: number,
+    total: number,
+  ) => void;
+
+  /**
    * Called by the driver runner after the page/environment is ready.
    * The driver-manager uses this to fire plugin onRunStart hooks
    * with the real page object (instead of null).
@@ -168,7 +194,25 @@ export interface RunOptions {
    */
   onBeforeClose?: (page: unknown) => Promise<void>;
 
-  /** Driver-specific options */
+  /**
+   * Per-session timeout in milliseconds.
+   * If a session exceeds this duration, it will be aborted with a timeout error.
+   * Both CLI and Worker benefit from this when using `executeScan`.
+   */
+  timeout?: number;
+
+  // ── Browser driver options ─────────────────────────────────────────
+
+  /** Shared browser instance (passed by executeScan for persistent mode) */
+  browser?: unknown;
+
+  /** JSON-stringified browser storage state (cookies, localStorage) for authenticated scans */
+  storageState?: string;
+
+  /** Extra HTTP headers to inject into every request (for header-based auth) */
+  extraHeaders?: Record<string, string>;
+
+  /** Allow additional driver-specific options */
   [key: string]: unknown;
 }
 
@@ -283,6 +327,18 @@ export interface VulcnDriver {
 
   /** Runner implementation */
   runner: RunnerDriver;
+
+  /**
+   * Create a shared resource (e.g., a browser instance) that can be
+   * passed to execute() via ctx.options.
+   *
+   * Used by executeScan() to improve performance by reusing resources
+   * across multiple sessions.
+   */
+  createSharedResource?: (
+    config: Record<string, unknown>,
+    options: RunOptions,
+  ) => Promise<unknown>;
 }
 
 /**

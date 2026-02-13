@@ -550,6 +550,310 @@ describe("DriverManager", () => {
         'Driver "missing" not found',
       );
     });
+
+    it("should call plugin onRunStart when onPageReady fires", async () => {
+      const onRunStartSpy = vi.fn();
+      const driver: VulcnDriver = {
+        name: "page-ready",
+        version: "1.0.0",
+        stepTypes: ["page-ready.action"],
+        recorder: {
+          async start() {
+            return {} as RecordingHandle;
+          },
+        },
+        runner: {
+          async execute(session, ctx): Promise<RunResult> {
+            // Simulate driver calling onPageReady
+            await ctx.options.onPageReady?.({} /* fake page */);
+            return {
+              findings: [],
+              stepsExecuted: 0,
+              payloadsTested: 0,
+              duration: 0,
+              errors: [],
+            };
+          },
+        },
+      };
+      manager.register(driver);
+
+      const pm = new PluginManager();
+      pm.addPlugin({
+        name: "run-start-hook",
+        version: "1.0.0",
+        hooks: { onRunStart: onRunStartSpy },
+      });
+
+      const session: Session = {
+        name: "test",
+        driver: "page-ready",
+        driverConfig: {},
+        steps: [],
+      };
+
+      await manager.execute(session, pm);
+      expect(onRunStartSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("should call plugin onBeforeClose when driver invokes it", async () => {
+      const onBeforeCloseSpy = vi.fn();
+      const driver: VulcnDriver = {
+        name: "close-test",
+        version: "1.0.0",
+        stepTypes: ["close-test.action"],
+        recorder: {
+          async start() {
+            return {} as RecordingHandle;
+          },
+        },
+        runner: {
+          async execute(session, ctx): Promise<RunResult> {
+            await ctx.options.onBeforeClose?.({} /* fake page */);
+            return {
+              findings: [],
+              stepsExecuted: 0,
+              payloadsTested: 0,
+              duration: 0,
+              errors: [],
+            };
+          },
+        },
+      };
+      manager.register(driver);
+
+      const pm = new PluginManager();
+      pm.addPlugin({
+        name: "before-close-hook",
+        version: "1.0.0",
+        hooks: { onBeforeClose: onBeforeCloseSpy },
+      });
+
+      const session: Session = {
+        name: "test",
+        driver: "close-test",
+        driverConfig: {},
+        steps: [],
+      };
+
+      await manager.execute(session, pm);
+      expect(onBeforeCloseSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("should call plugin onRunEnd and allow result transformation", async () => {
+      const driver: VulcnDriver = {
+        name: "run-end",
+        version: "1.0.0",
+        stepTypes: ["run-end.action"],
+        recorder: {
+          async start() {
+            return {} as RecordingHandle;
+          },
+        },
+        runner: {
+          async execute(): Promise<RunResult> {
+            return {
+              findings: [],
+              stepsExecuted: 1,
+              payloadsTested: 0,
+              duration: 50,
+              errors: [],
+            };
+          },
+        },
+      };
+      manager.register(driver);
+
+      const pm = new PluginManager();
+      pm.addPlugin({
+        name: "run-end-hook",
+        version: "1.0.0",
+        hooks: {
+          onRunEnd: async (result, _ctx) => {
+            return {
+              ...result,
+              errors: [...result.errors, "run-end-hook-ran"],
+            };
+          },
+        },
+      });
+
+      const session: Session = {
+        name: "test",
+        driver: "run-end",
+        driverConfig: {},
+        steps: [{ id: "1", type: "run-end.action", timestamp: 0 }],
+      };
+
+      const result = await manager.execute(session, pm);
+      expect(result.errors).toContain("run-end-hook-ran");
+    });
+
+    it("should handle onRunStart hook errors gracefully", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const driver: VulcnDriver = {
+        name: "hook-err",
+        version: "1.0.0",
+        stepTypes: ["hook-err.action"],
+        recorder: {
+          async start() {
+            return {} as RecordingHandle;
+          },
+        },
+        runner: {
+          async execute(session, ctx): Promise<RunResult> {
+            await ctx.options.onPageReady?.({});
+            return {
+              findings: [],
+              stepsExecuted: 0,
+              payloadsTested: 0,
+              duration: 0,
+              errors: [],
+            };
+          },
+        },
+      };
+      manager.register(driver);
+
+      const pm = new PluginManager();
+      pm.addPlugin({
+        name: "error-hook",
+        version: "1.0.0",
+        hooks: {
+          onRunStart: async () => {
+            throw new Error("hook boom");
+          },
+        },
+      });
+
+      const session: Session = {
+        name: "test",
+        driver: "hook-err",
+        driverConfig: {},
+        steps: [],
+      };
+
+      // onRunStart is ERROR severity — logged but does not throw
+      const result = await manager.execute(session, pm);
+      expect(result).toBeDefined();
+      expect(errorSpy).toHaveBeenCalled();
+
+      // ErrorHandler should have captured it
+      const errors = pm.getErrorHandler().getErrors();
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[0].message).toContain("hook boom");
+
+      errorSpy.mockRestore();
+    });
+
+    it("should handle onBeforeClose hook errors gracefully", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const driver: VulcnDriver = {
+        name: "close-err",
+        version: "1.0.0",
+        stepTypes: ["close-err.action"],
+        recorder: {
+          async start() {
+            return {} as RecordingHandle;
+          },
+        },
+        runner: {
+          async execute(session, ctx): Promise<RunResult> {
+            await ctx.options.onBeforeClose?.({});
+            return {
+              findings: [],
+              stepsExecuted: 0,
+              payloadsTested: 0,
+              duration: 0,
+              errors: [],
+            };
+          },
+        },
+      };
+      manager.register(driver);
+
+      const pm = new PluginManager();
+      pm.addPlugin({
+        name: "close-error-hook",
+        version: "1.0.0",
+        hooks: {
+          onBeforeClose: async () => {
+            throw new Error("close hook boom");
+          },
+        },
+      });
+
+      const session: Session = {
+        name: "test",
+        driver: "close-err",
+        driverConfig: {},
+        steps: [],
+      };
+
+      const result = await manager.execute(session, pm);
+      expect(result).toBeDefined();
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it("should throw on onRunEnd hook errors (FATAL severity)", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const driver: VulcnDriver = {
+        name: "end-err",
+        version: "1.0.0",
+        stepTypes: ["end-err.action"],
+        recorder: {
+          async start() {
+            return {} as RecordingHandle;
+          },
+        },
+        runner: {
+          async execute(): Promise<RunResult> {
+            return {
+              findings: [],
+              stepsExecuted: 0,
+              payloadsTested: 0,
+              duration: 0,
+              errors: [],
+            };
+          },
+        },
+      };
+      manager.register(driver);
+
+      const pm = new PluginManager();
+      pm.addPlugin({
+        name: "run-end-error-hook",
+        version: "1.0.0",
+        hooks: {
+          onRunEnd: async () => {
+            throw new Error("run end boom");
+          },
+        },
+      });
+
+      const session: Session = {
+        name: "test",
+        driver: "end-err",
+        driverConfig: {},
+        steps: [],
+      };
+
+      // onRunEnd is FATAL severity — should throw and halt execution
+      await expect(manager.execute(session, pm)).rejects.toThrow(
+        "run end boom",
+      );
+
+      // ErrorHandler should have captured it
+      const errors = pm.getErrorHandler().getErrors();
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[0].severity).toBe("fatal");
+
+      errorSpy.mockRestore();
+    });
   });
 
   describe("executeScan", () => {
@@ -653,6 +957,200 @@ describe("DriverManager", () => {
       const { aggregate } = await manager.executeScan(sessions, pm);
 
       expect(aggregate.errors).toContain("scan-end-hook-ran");
+    });
+
+    it("should call onSessionStart and onSessionEnd callbacks", async () => {
+      manager.register(createMockDriver("mock"));
+
+      const sessionStartCalls: [string, number, number][] = [];
+      const sessionEndCalls: [string, number, number][] = [];
+
+      const sessions: Session[] = [
+        { name: "A", driver: "mock", driverConfig: {}, steps: [] },
+        { name: "B", driver: "mock", driverConfig: {}, steps: [] },
+      ];
+
+      const pm = new PluginManager();
+      await manager.executeScan(sessions, pm, {
+        onSessionStart: (session, index, total) => {
+          sessionStartCalls.push([session.name, index, total]);
+        },
+        onSessionEnd: (session, _result, index, total) => {
+          sessionEndCalls.push([session.name, index, total]);
+        },
+      });
+
+      expect(sessionStartCalls).toEqual([
+        ["A", 0, 2],
+        ["B", 1, 2],
+      ]);
+      expect(sessionEndCalls).toEqual([
+        ["A", 0, 2],
+        ["B", 1, 2],
+      ]);
+    });
+
+    it("should clear findings between sessions", async () => {
+      // Create a driver that reports plugin manager findings
+      const driver: VulcnDriver = {
+        name: "leak-test",
+        version: "1.0.0",
+        stepTypes: ["leak-test.action"],
+        recorder: {
+          async start() {
+            return {} as RecordingHandle;
+          },
+        },
+        runner: {
+          async execute(session, ctx): Promise<RunResult> {
+            ctx.addFinding({
+              type: "xss",
+              severity: "high",
+              title: `Finding from ${session.name}`,
+              description: "test",
+              stepId: "1",
+              url: "http://test.com",
+              payload: "test",
+            });
+            // Return ONLY this session's findings
+            return {
+              findings: ctx.findings,
+              stepsExecuted: 1,
+              payloadsTested: 1,
+              duration: 50,
+              errors: [],
+            };
+          },
+        },
+      };
+      manager.register(driver);
+
+      const sessions: Session[] = [
+        {
+          name: "S1",
+          driver: "leak-test",
+          driverConfig: {},
+          steps: [{ id: "1", type: "leak-test.action", timestamp: 0 }],
+        },
+        {
+          name: "S2",
+          driver: "leak-test",
+          driverConfig: {},
+          steps: [{ id: "2", type: "leak-test.action", timestamp: 0 }],
+        },
+      ];
+
+      const pm = new PluginManager();
+      const { results } = await manager.executeScan(sessions, pm);
+
+      // Each session should only have 1 finding (not accumulated from previous)
+      expect(results[0].findings.length).toBe(1);
+      expect(results[0].findings[0].title).toBe("Finding from S1");
+      expect(results[1].findings.length).toBe(1);
+      expect(results[1].findings[0].title).toBe("Finding from S2");
+    });
+
+    it("should auto-initialize plugins if not already initialized", async () => {
+      manager.register(createMockDriver("mock"));
+      const onInitSpy = vi.fn();
+
+      const pm = new PluginManager();
+      pm.addPlugin({
+        name: "auto-init-test",
+        version: "1.0.0",
+        hooks: { onInit: onInitSpy },
+      });
+
+      const sessions: Session[] = [
+        { name: "S1", driver: "mock", driverConfig: {}, steps: [] },
+      ];
+
+      // Calling executeScan without explicit initialize()
+      await manager.executeScan(sessions, pm);
+
+      // onInit should have been called automatically
+      expect(onInitSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("should not double-initialize plugins on repeated executeScan calls", async () => {
+      manager.register(createMockDriver("mock"));
+      const onInitSpy = vi.fn();
+
+      const pm = new PluginManager();
+      pm.addPlugin({
+        name: "idempotent-init",
+        version: "1.0.0",
+        hooks: { onInit: onInitSpy },
+      });
+
+      const sessions: Session[] = [
+        { name: "S1", driver: "mock", driverConfig: {}, steps: [] },
+      ];
+
+      await manager.executeScan(sessions, pm);
+      await manager.executeScan(sessions, pm);
+
+      // onInit should only fire once (idempotent)
+      expect(onInitSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("should timeout slow sessions when timeout option is set", async () => {
+      // Create a slow driver that takes longer than the timeout
+      const slowDriver: VulcnDriver = {
+        name: "slow",
+        version: "1.0.0",
+        stepTypes: ["slow.action"],
+        recorder: {
+          async start() {
+            return {} as RecordingHandle;
+          },
+        },
+        runner: {
+          async execute(): Promise<RunResult> {
+            // Simulate a slow session (500ms)
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            return {
+              findings: [],
+              stepsExecuted: 1,
+              payloadsTested: 0,
+              duration: 500,
+              errors: [],
+            };
+          },
+        },
+      };
+      manager.register(slowDriver);
+
+      const sessions: Session[] = [
+        { name: "Slow Session", driver: "slow", driverConfig: {}, steps: [] },
+      ];
+
+      const pm = new PluginManager();
+      const { results, aggregate } = await manager.executeScan(sessions, pm, {
+        timeout: 50, // 50ms timeout — way shorter than 500ms
+      });
+
+      // Should record timeout error
+      expect(results.length).toBe(1);
+      expect(results[0].errors.length).toBe(1);
+      expect(results[0].errors[0]).toContain("timed out");
+      expect(aggregate.errors.length).toBe(1);
+    });
+
+    it("should not timeout fast sessions", async () => {
+      manager.register(createMockDriver("mock"));
+
+      const sessions: Session[] = [
+        { name: "Fast", driver: "mock", driverConfig: {}, steps: [] },
+      ];
+
+      const pm = new PluginManager();
+      const { results } = await manager.executeScan(sessions, pm, {
+        timeout: 5000, // Generous timeout
+      });
+
+      expect(results.length).toBe(1);
+      expect(results[0].errors).toEqual([]);
     });
   });
 });

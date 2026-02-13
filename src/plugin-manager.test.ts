@@ -274,4 +274,194 @@ describe("PluginManager", () => {
       expect(ctx.fetch).toBe(globalThis.fetch);
     });
   });
+
+  describe("hasPlugin", () => {
+    it("should return true for loaded plugin", () => {
+      manager.addPlugin({ name: "test-plugin", version: "1.0.0" });
+      expect(manager.hasPlugin("test-plugin")).toBe(true);
+    });
+
+    it("should return false for unloaded plugin", () => {
+      expect(manager.hasPlugin("nonexistent")).toBe(false);
+    });
+  });
+
+  describe("callHookCollect", () => {
+    it("should collect results from all plugins", async () => {
+      manager.addPlugin({
+        name: "collector-1",
+        version: "1.0.0",
+        hooks: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onInit: (async () => "result-1") as any,
+        },
+      });
+
+      manager.addPlugin({
+        name: "collector-2",
+        version: "1.0.0",
+        hooks: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onInit: (async () => "result-2") as any,
+        },
+      });
+
+      const results = await manager.callHookCollect(
+        "onInit",
+        async (hook, ctx) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (await (hook as any)(ctx)) as string;
+        },
+      );
+
+      expect(results).toEqual(["result-1", "result-2"]);
+    });
+
+    it("should handle array results", async () => {
+      manager.addPlugin({
+        name: "array-plugin",
+        version: "1.0.0",
+        hooks: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onInit: (async () => ["a", "b"]) as any,
+        },
+      });
+
+      const results = await manager.callHookCollect(
+        "onInit",
+        async (hook, ctx) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (await (hook as any)(ctx)) as string[];
+        },
+      );
+
+      expect(results).toEqual(["a", "b"]);
+    });
+
+    it("should skip null results", async () => {
+      manager.addPlugin({
+        name: "null-plugin",
+        version: "1.0.0",
+        hooks: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onInit: (async () => null) as any,
+        },
+      });
+
+      const results = await manager.callHookCollect(
+        "onInit",
+        async (hook, ctx) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (await (hook as any)(ctx)) as null;
+        },
+      );
+
+      expect(results).toEqual([]);
+    });
+
+    it("should continue on errors", async () => {
+      const consoleSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+
+      manager.addPlugin({
+        name: "error-collect",
+        version: "1.0.0",
+        hooks: {
+          onInit: async () => {
+            throw new Error("boom");
+          },
+        },
+      });
+
+      manager.addPlugin({
+        name: "ok-collect",
+        version: "1.0.0",
+        hooks: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onInit: (async () => "ok") as any,
+        },
+      });
+
+      const results = await manager.callHookCollect(
+        "onInit",
+        async (hook, ctx) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (await (hook as any)(ctx)) as string;
+        },
+      );
+
+      expect(results).toEqual(["ok"]);
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe("callHookPipe", () => {
+    it("should pipe value through all plugins", async () => {
+      manager.addPlugin({
+        name: "pipe-1",
+        version: "1.0.0",
+        hooks: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onInit: (async (ctx: unknown) => ctx) as any,
+        },
+      });
+
+      manager.addPlugin({
+        name: "pipe-2",
+        version: "1.0.0",
+        hooks: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onInit: (async (ctx: unknown) => ctx) as any,
+        },
+      });
+
+      const result = await manager.callHookPipe(
+        "onInit",
+        10,
+        async (_hook, value, _ctx) => value + 5,
+      );
+
+      expect(result).toBe(20);
+    });
+
+    it("should return initial value when no plugins", async () => {
+      const result = await manager.callHookPipe(
+        "onInit",
+        "initial",
+        async (_hook, value, _ctx) => value + "-modified",
+      );
+
+      expect(result).toBe("initial");
+    });
+
+    it("should continue on errors", async () => {
+      const consoleSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+
+      manager.addPlugin({
+        name: "error-pipe",
+        version: "1.0.0",
+        hooks: {
+          onInit: async () => {
+            throw new Error("pipe boom");
+          },
+        },
+      });
+
+      const result = await manager.callHookPipe(
+        "onInit",
+        "initial",
+        async (hook, value, ctx) => {
+          await (hook as (ctx: unknown) => Promise<unknown>)(ctx);
+          return value;
+        },
+      );
+
+      // Should keep original value on error
+      expect(result).toBe("initial");
+      consoleSpy.mockRestore();
+    });
+  });
 });

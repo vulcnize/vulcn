@@ -22,7 +22,7 @@ export type PayloadCategory =
 /**
  * Payload source types
  */
-export type PayloadSource = "custom" | "payloadbox" | "plugin";
+export type PayloadSource = "curated" | "custom" | "payloadbox" | "plugin";
 
 /**
  * Runtime payload structure - used by plugins and the runner
@@ -64,4 +64,33 @@ export interface CustomPayload {
 export interface CustomPayloadFile {
   version?: string;
   payloads: CustomPayload[];
+}
+
+/**
+ * Determine finding severity based on vulnerability category.
+ *
+ * Central mapping used by all drivers and plugins — single source of truth
+ * so severity ratings remain consistent across Tier 1 (HTTP) and Tier 2 (browser) scans.
+ */
+export function getSeverity(
+  category: PayloadCategory,
+): "critical" | "high" | "medium" | "low" | "info" {
+  switch (category) {
+    case "sqli":
+    case "command-injection":
+    case "xxe":
+      return "critical";
+    case "xss":
+    case "ssrf":
+    case "path-traversal":
+      return "high";
+    case "open-redirect":
+      return "medium";
+    case "security-misconfiguration":
+      return "low";
+    case "information-disclosure":
+      return "info";
+    default:
+      return "medium";
+  }
 }

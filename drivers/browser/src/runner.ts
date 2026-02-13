@@ -9,6 +9,11 @@
  *   - Uses page.goBack() between payloads instead of full page.goto()
  *   - Falls back to full navigation when goBack() fails
  *   - 5-10x faster on SPAs, same speed on simple sites
+ *
+ * v3: URL parameter injection support.
+ *   - browser.navigate steps can be marked injectable with a parameter name
+ *   - URL parameter payloads are injected by rewriting the query string
+ *   - No form fill/click needed — just navigate and check for reflection
  */
 
 import type {
@@ -26,9 +31,13 @@ import type {
   Finding,
   RuntimePayload,
   PayloadCategory,
+  DetectContext,
 } from "@vulcn/engine";
+import type { Response } from "playwright";
+import { getSeverity, ErrorSeverity, fatal } from "@vulcn/engine";
 
 import { launchBrowser, type BrowserType } from "./browser";
+import { checkReflection } from "./reflection";
 import type { BrowserStep } from "./index";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -43,6 +52,20 @@ interface CurrentPayloadInfo {
   payloadSet: RuntimePayload;
   payloadValue: string;
 }
+
+/**
+ * An injectable step can be either:
+ *   - browser.input: fills a form field with the payload
+ *   - browser.navigate: rewrites a URL query parameter with the payload
+ */
+type InjectableStep =
+  | (Step & { type: "browser.input"; injectable?: boolean })
+  | (Step & {
+      type: "browser.navigate";
+      injectable: true;
+      parameter: string;
+      url: string;
+    });
 
 // ── Browser Runner ─────────────────────────────────────────────────────
 
@@ -69,24 +92,31 @@ export class BrowserRunner {
       width: 1280,
       height: 720,
     };
-    const startUrl = config.startUrl as string;
+    const startUrl = config.startUrl as string | undefined;
     const headless = ctx.options.headless ?? true;
 
     const startTime = Date.now();
     const errors: string[] = [];
     let payloadsTested = 0;
 
+    // ── Validate session data ─────────────────────────────────────────
+    // If startUrl is missing, every step will fail. Surface immediately.
+    if (!startUrl) {
+      throw fatal(
+        `Session "${session.name}" has no startUrl in driverConfig. ` +
+          `The session data is malformed — cannot replay without a start URL.`,
+        "driver:browser",
+        { context: { session: session.name, driverConfig: config } },
+      );
+    }
+
     const payloads = ctx.payloads;
     if (payloads.length === 0) {
-      return {
-        findings: [],
-        stepsExecuted: session.steps.length,
-        payloadsTested: 0,
-        duration: Date.now() - startTime,
-        errors: [
-          "No payloads loaded. Add a payload plugin or configure payloads.",
-        ],
-      };
+      throw fatal(
+        "No payloads loaded. Add a payload plugin or configure payloads.",
+        "driver:browser",
+        { context: { session: session.name } },
+      );
     }
 
     // ── Browser lifecycle ────────────────────────────────────────────
@@ -105,8 +135,8 @@ export class BrowserRunner {
       contextOptions.storageState = JSON.parse(storageState);
     }
 
-    const context = await browser.newContext(contextOptions);
-    const page = await context.newPage();
+    let context = await browser.newContext(contextOptions);
+    let page = await context.newPage();
 
     // Signal that the page is ready — plugins (e.g. passive scanner)
     // can now attach event listeners to the real page object
@@ -117,27 +147,51 @@ export class BrowserRunner {
     let currentPayloadInfo: CurrentPayloadInfo | null = null;
 
     const dialogHandler = createDialogHandler(
+      ctx,
       page,
       eventFindings,
       () => currentPayloadInfo,
     );
     const consoleHandler = createConsoleHandler(
+      ctx,
       eventFindings,
+      () => currentPayloadInfo,
+    );
+
+    // Wire onNetworkResponse hooks — dispatches to all plugins on each
+    // HTTP response so they can inspect status codes, bodies, headers.
+    const responseHandler = createNetworkResponseHandler(
+      ctx,
+      page,
       () => currentPayloadInfo,
     );
 
     page.on("dialog", dialogHandler);
     page.on("console", consoleHandler);
+    page.on("response", responseHandler);
 
     try {
-      // Find injectable steps (browser.input with injectable=true)
+      // Find ALL injectable steps:
+      //   - browser.input with injectable=true (form-based injection)
+      //   - browser.navigate with injectable=true (URL parameter injection)
       const injectableSteps = session.steps.filter(
-        (
-          step,
-        ): step is Step & { type: "browser.input"; injectable?: boolean } =>
-          step.type === "browser.input" &&
-          (step as BrowserStep & { type: "browser.input" }).injectable !==
-            false,
+        (step): step is InjectableStep => {
+          if (
+            step.type === "browser.input" &&
+            (step as BrowserStep & { type: "browser.input" }).injectable !==
+              false
+          ) {
+            return true;
+          }
+          if (
+            step.type === "browser.navigate" &&
+            (step as any).injectable === true &&
+            (step as any).parameter
+          ) {
+            return true;
+          }
+          return false;
+        },
       );
 
       // Build interleaved payload list (round-robin across categories)
@@ -148,102 +202,241 @@ export class BrowserRunner {
 
       // ── Per-step payload cycling ───────────────────────────────────
       for (const injectableStep of injectableSteps) {
-        let isFirstPayload = true;
-        // Track the URL we navigate back to for goBack fallback
-        let formPageUrl: string | null = null;
-
-        for (const { payloadSet, value } of allPayloads) {
-          // Skip if this vuln type is already confirmed for this step
-          const stepTypeKey = `${injectableStep.id}::${payloadSet.category}`;
-          if (confirmedTypes.has(stepTypeKey)) {
-            continue;
-          }
+        if (injectableStep.type === "browser.navigate") {
+          // URL parameter injection — navigate directly with payload in URL
+          payloadsTested += await cycleUrlPayloads(
+            page,
+            session,
+            injectableStep as Step & {
+              type: "browser.navigate";
+              injectable: true;
+              parameter: string;
+              url: string;
+            },
+            allPayloads,
+            confirmedTypes,
+            eventFindings,
+            ctx,
+            errors,
+            currentPayloadInfo,
+            (info) => {
+              currentPayloadInfo = info;
+            },
+          );
+        } else {
+          // ── Baseline Submission ──
+          // Capture the "normal" response of the form submission (with safe data)
+          // so plugins can learn what errors/content are normal.
+          const inputStep = injectableStep as BrowserStep & {
+            type: "browser.input";
+          };
+          // We need the original/safe value recorded in the session
+          const safeValue = inputStep.value;
 
           try {
+            // Set context so onNetworkResponse knows this is the baseline
             currentPayloadInfo = {
               stepId: injectableStep.id,
-              payloadSet,
-              payloadValue: value,
+              payloadSet: allPayloads[0]?.payloadSet ?? ({} as RuntimePayload),
+              payloadValue: "__baseline__",
             };
 
-            if (isFirstPayload) {
-              // First payload: full navigation + replay all steps
-              await replayWithPayload(
-                page,
-                session,
-                injectableStep,
-                value,
-                startUrl,
-              );
-              isFirstPayload = false;
-              // Capture the form page URL for fallback navigation
-              formPageUrl = startUrl;
-            } else {
-              // Subsequent payloads: try goBack() first (fast path)
-              const cycled = await cyclePayload(
-                page,
-                session,
-                injectableStep,
-                value,
-                formPageUrl ?? startUrl,
-              );
-              if (!cycled) {
-                // goBack failed — fall back to full replay
+            // Use replayWithPayload to submit the form with safe data
+            await replayWithPayload(
+              page,
+              session,
+              inputStep,
+              safeValue,
+              startUrl,
+            );
+          } catch (err) {
+            // Non-fatal: just means we might not have a perfect baseline
+            ctx.logger.warn(
+              `Baseline submission failed for step ${injectableStep.id}: ${err}`,
+            );
+          } finally {
+            currentPayloadInfo = null;
+          }
+
+          // Form-based injection — fill input and click submit
+          let isFirstPayload = true;
+          // Track the URL we navigate back to for goBack fallback
+          let formPageUrl: string | null = null;
+
+          for (const { payloadSet, value } of allPayloads) {
+            // Skip if this vuln type is already confirmed for this step
+            const stepTypeKey = `${injectableStep.id}::${payloadSet.category}`;
+            if (confirmedTypes.has(stepTypeKey)) {
+              continue;
+            }
+
+            try {
+              currentPayloadInfo = {
+                stepId: injectableStep.id,
+                payloadSet,
+                payloadValue: value,
+              };
+
+              if (isFirstPayload) {
+                // First payload: full navigation + replay all steps
                 await replayWithPayload(
                   page,
                   session,
-                  injectableStep,
+                  injectableStep as Step & { type: "browser.input" },
                   value,
                   startUrl,
                 );
+                isFirstPayload = false;
+                // Capture the form page URL for fallback navigation
+                formPageUrl = startUrl;
+              } else {
+                // Subsequent payloads: try goBack() first (fast path)
+                const cycled = await cyclePayload(
+                  page,
+                  session,
+                  injectableStep as Step & { type: "browser.input" },
+                  value,
+                  formPageUrl ?? startUrl,
+                );
+                if (!cycled) {
+                  // goBack failed — fall back to full replay
+                  await replayWithPayload(
+                    page,
+                    session,
+                    injectableStep as Step & { type: "browser.input" },
+                    value,
+                    startUrl,
+                  );
+                }
               }
-            }
 
-            // Check for reflection
-            const reflectionFinding = await checkReflection(
-              page,
-              injectableStep,
-              payloadSet,
-              value,
-            );
-
-            // Collect all findings from this payload
-            const allFindings = [...eventFindings];
-            if (reflectionFinding) {
-              allFindings.push(reflectionFinding);
-            }
-
-            // Deduplicate: only add findings we haven't already reported
-            const seenKeys = new Set<string>();
-            for (const finding of allFindings) {
-              const dedupKey = `${finding.type}::${finding.stepId}::${finding.title}`;
-              if (!seenKeys.has(dedupKey)) {
-                seenKeys.add(dedupKey);
-                ctx.addFinding(finding);
+              // Check for reflection — only for XSS payloads.
+              // Reflection-based detection is NOT valid for SQLi:
+              // reflecting `' OR 1=1--` in the page doesn't prove a SQL
+              // injection vulnerability — it just means the app echoes input.
+              let reflectionFinding: Finding | undefined;
+              if (payloadSet.category === "xss") {
+                const pageContent = await page.content();
+                let rawContent: string | undefined;
+                try {
+                  // Fetch the current page URL to get raw HTML (before DOM parsing)
+                  const cookies = await context.cookies();
+                  const cookieHeader = cookies
+                    .map((c) => `${c.name}=${c.value}`)
+                    .join("; ");
+                  const res = await fetch(page.url(), {
+                    headers: { Cookie: cookieHeader },
+                  });
+                  if (res.ok) rawContent = await res.text();
+                } catch {
+                  // Fetch failed — encoding check will be skipped
+                }
+                reflectionFinding = checkReflection({
+                  content: pageContent,
+                  payloadSet,
+                  payloadValue: value,
+                  stepId: injectableStep.id,
+                  url: page.url(),
+                  rawContent,
+                });
               }
+
+              // Dispatch onAfterPayload hooks to all plugins
+              const pluginFindings = await dispatchAfterPayload(ctx, page, {
+                step: injectableStep,
+                payloadSet,
+                payloadValue: value,
+                stepId: injectableStep.id,
+              });
+
+              // Collect all findings from this payload
+              const allFindings = [...eventFindings, ...pluginFindings];
+              if (reflectionFinding) {
+                allFindings.push(reflectionFinding);
+              }
+
+              // Deduplicate: only add findings we haven't already reported
+              const seenKeys = new Set<string>();
+              for (const finding of allFindings) {
+                const dedupKey = `${finding.type}::${finding.stepId}::${finding.title}`;
+                if (!seenKeys.has(dedupKey)) {
+                  seenKeys.add(dedupKey);
+                  ctx.addFinding(finding);
+                }
+              }
+
+              // Only skip remaining payloads if we have a high-confidence
+              // finding whose type matches the payload category. Low-confidence
+              // "reflection" findings should not prevent trying payloads that
+              // might trigger actual execution (e.g. alert() → confirmed XSS).
+              const hasConfirmedFinding = allFindings.some(
+                (f) => f.type === payloadSet.category,
+              );
+              if (hasConfirmedFinding) {
+                confirmedTypes.add(stepTypeKey);
+              }
+
+              // Clear event findings for next iteration
+              eventFindings.length = 0;
+              payloadsTested++;
+
+              // Report progress
+              ctx.options.onStepComplete?.(injectableStep.id, payloadsTested);
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+
+              // Check if page/context is dead — no point retrying on a dead page
+              if (errMsg.includes("has been closed")) {
+                ctx.errors.catch(err, {
+                  severity: ErrorSeverity.ERROR,
+                  source: "driver:browser",
+                  context: {
+                    step: injectableStep.id,
+                    payload: value.slice(0, 40),
+                    session: session.name,
+                  },
+                });
+                errors.push(`${injectableStep.id}: ${String(err)}`);
+
+                // Try to recover by creating a fresh context+page
+                try {
+                  context = await browser.newContext(contextOptions);
+                  page = await context.newPage();
+                  page.on("dialog", dialogHandler);
+                  page.on("console", consoleHandler);
+                  isFirstPayload = true; // Force full navigation on next payload
+                  continue;
+                } catch {
+                  // Browser itself is dead — bail out of entire session
+                  errors.push(
+                    `${injectableStep.id}: Browser crashed — aborting session`,
+                  );
+                  break;
+                }
+              }
+
+              // Surface per-payload errors through the error handler.
+              // These are NOT fatal — one payload failing shouldn't kill the session.
+              ctx.errors.catch(err, {
+                severity: ErrorSeverity.ERROR,
+                source: "driver:browser",
+                context: {
+                  step: injectableStep.id,
+                  payload: value.slice(0, 40),
+                  session: session.name,
+                },
+              });
+              errors.push(`${injectableStep.id}: ${String(err)}`);
+              // If an error occurred, reset so next payload does full navigation
+              isFirstPayload = true;
             }
-
-            // If we got any finding, mark as confirmed and skip remaining
-            if (allFindings.length > 0) {
-              confirmedTypes.add(stepTypeKey);
-            }
-
-            // Clear event findings for next iteration
-            eventFindings.length = 0;
-            payloadsTested++;
-
-            // Report progress
-            ctx.options.onStepComplete?.(injectableStep.id, payloadsTested);
-          } catch (err) {
-            errors.push(`${injectableStep.id}: ${String(err)}`);
-            // If an error occurred, reset so next payload does full navigation
-            isFirstPayload = true;
           }
         }
       }
     } finally {
       page.off("dialog", dialogHandler);
       page.off("console", consoleHandler);
+      page.off("response", responseHandler);
       currentPayloadInfo = null;
 
       // Let plugins flush pending async work before browser closes
@@ -268,38 +461,256 @@ export class BrowserRunner {
   }
 }
 
+// ── URL Parameter Injection ────────────────────────────────────────────
+
+/**
+ * Inject payloads by rewriting a URL query parameter and navigating directly.
+ *
+ * This is the fast path for GET-based injection points (WAVSEP GET tests,
+ * OWASP Benchmark, and any real-world page that reflects a URL parameter).
+ *
+ * For each payload:
+ *   1. Rewrite the URL: replace ?param=value with ?param=PAYLOAD
+ *   2. Navigate to the modified URL
+ *   3. Check for reflection + dialog events
+ *
+ * Returns the number of payloads tested.
+ */
+async function cycleUrlPayloads(
+  page: Page,
+  _session: Session,
+  targetStep: Step & {
+    type: "browser.navigate";
+    injectable: true;
+    parameter: string;
+    url: string;
+  },
+  allPayloads: PayloadItem[],
+  confirmedTypes: Set<string>,
+  eventFindings: Finding[],
+  ctx: RunContext,
+  errors: string[],
+  _currentPayloadInfo: CurrentPayloadInfo | null,
+  setPayloadInfo: (info: CurrentPayloadInfo | null) => void,
+): Promise<number> {
+  let payloadsTested = 0;
+
+  // ── Baseline capture ──────────────────────────────────────────────
+  // Navigate to the clean URL so onNetworkResponse can capture the
+  // baseline response (pre-existing SQL errors, etc.) before we
+  // start injecting payloads. The response handler only fires when
+  // payloadInfo is set, so we set a synthetic "baseline" payload.
+  try {
+    setPayloadInfo({
+      stepId: targetStep.id,
+      payloadSet: allPayloads[0]?.payloadSet ?? ({} as RuntimePayload),
+      payloadValue: "__baseline__",
+    });
+    await page.goto(targetStep.url, {
+      waitUntil: "domcontentloaded",
+      timeout: 10000,
+    });
+    // Brief pause for onNetworkResponse to process
+    await page.waitForTimeout(100);
+  } catch {
+    // Baseline failed — continue without it
+  } finally {
+    setPayloadInfo(null);
+  }
+
+  for (const { payloadSet, value } of allPayloads) {
+    const stepTypeKey = `${targetStep.id}::${payloadSet.category}`;
+    if (confirmedTypes.has(stepTypeKey)) continue;
+
+    try {
+      setPayloadInfo({
+        stepId: targetStep.id,
+        payloadSet,
+        payloadValue: value,
+      });
+
+      // Build the URL with the payload in the query parameter
+      const injectedUrl = buildInjectedUrl(
+        targetStep.url,
+        targetStep.parameter,
+        value,
+      );
+
+      // Navigate directly — this is all that's needed for GET-based injection
+      // Capture the raw HTTP response for encoding-aware reflection detection
+      const response = await page.goto(injectedUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 10000,
+      });
+
+      // Get raw HTTP body (before DOM parsing) for encoding checks
+      let rawContent: string | undefined;
+      try {
+        rawContent = await response?.text();
+      } catch {
+        // Response body not available (redirected, etc.)
+      }
+
+      // Wait for scripts/dialogs - 'domcontentloaded' is usually enough,
+      // but we add a small buffer for heavy frameworks if needed.
+      try {
+        await page.waitForLoadState("domcontentloaded", { timeout: 1000 });
+      } catch {
+        // Ignore timeout
+      }
+
+      // Check reflection — only for XSS payloads.
+      // SQL payload reflection does NOT indicate SQL injection.
+      let reflectionFinding: Finding | undefined;
+      if (payloadSet.category === "xss") {
+        const pageContent = await page.content();
+        reflectionFinding = checkReflection({
+          content: pageContent,
+          payloadSet,
+          payloadValue: value,
+          stepId: targetStep.id,
+          url: page.url(),
+          rawContent,
+        });
+      }
+
+      // Dispatch onAfterPayload hooks to all plugins
+      const pluginFindings = await dispatchAfterPayload(ctx, page, {
+        step: targetStep,
+        payloadSet,
+        payloadValue: value,
+        stepId: targetStep.id,
+      });
+
+      // Collect findings
+      const allFindings = [...eventFindings, ...pluginFindings];
+      if (reflectionFinding) {
+        allFindings.push(reflectionFinding);
+      }
+
+      // Deduplicate and add
+      const seenKeys = new Set<string>();
+      for (const finding of allFindings) {
+        const dedupKey = `${finding.type}::${finding.stepId}::${finding.title}`;
+        if (!seenKeys.has(dedupKey)) {
+          seenKeys.add(dedupKey);
+          ctx.addFinding(finding);
+        }
+      }
+
+      // Only skip remaining payloads on high-confidence (category-matching) findings
+      const hasConfirmedFinding = allFindings.some(
+        (f) => f.type === payloadSet.category,
+      );
+      if (hasConfirmedFinding) {
+        confirmedTypes.add(stepTypeKey);
+      }
+
+      eventFindings.length = 0;
+      payloadsTested++;
+
+      ctx.options.onStepComplete?.(targetStep.id, payloadsTested);
+    } catch (err) {
+      ctx.errors.catch(err, {
+        severity: ErrorSeverity.ERROR,
+        source: "driver:browser",
+        context: {
+          step: targetStep.id,
+          payload: value.slice(0, 40),
+        },
+      });
+      errors.push(`${targetStep.id}: ${String(err)}`);
+    }
+  }
+
+  setPayloadInfo(null);
+  return payloadsTested;
+}
+
+/**
+ * Build a URL with a payload injected into a specific query parameter.
+ *
+ * Example:
+ *   buildInjectedUrl(
+ *     "http://host/page.jsp?userinput=test&other=1",
+ *     "userinput",
+ *     "<script>alert(1)</script>"
+ *   )
+ *   → "http://host/page.jsp?userinput=%3Cscript%3Ealert(1)%3C%2Fscript%3E&other=1"
+ *
+ * If the parameter doesn't exist in the URL, it's appended.
+ */
+function buildInjectedUrl(
+  originalUrl: string,
+  parameter: string,
+  payload: string,
+): string {
+  const url = new URL(originalUrl);
+  url.searchParams.set(parameter, payload);
+  return url.toString();
+}
+
 // ── Dialog / Console Handlers ──────────────────────────────────────────
 
 function createDialogHandler(
+  ctx: RunContext,
   page: Page,
   eventFindings: Finding[],
   getPayloadInfo: () => CurrentPayloadInfo | null,
 ) {
   return async (dialog: Dialog) => {
     const info = getPayloadInfo();
-    if (info) {
-      const message = dialog.message();
-      const dialogType = dialog.type();
+    const pm = ctx.pluginManager;
 
-      // Skip beforeunload dialogs (not XSS-related)
-      if (dialogType !== "beforeunload") {
-        eventFindings.push({
-          type: "xss",
-          severity: "high",
-          title: `XSS Confirmed - ${dialogType}() triggered`,
-          description: `JavaScript ${dialogType}() dialog was triggered by payload injection. Message: "${message}"`,
-          stepId: info.stepId,
-          payload: info.payloadValue,
-          url: page.url(),
-          evidence: `Dialog type: ${dialogType}, Message: ${message}`,
-          metadata: {
-            dialogType,
-            dialogMessage: message,
-            detectionMethod: "dialog",
-          },
-        });
+    // Dispatch to plugins
+    for (const loaded of pm.getPlugins()) {
+      if (loaded.enabled && loaded.plugin.hooks?.onDialog) {
+        try {
+          const baseCtx = pm.createContext(loaded.config, loaded.plugin.name);
+          // Look up step safely
+          const currentStep = info?.stepId
+            ? ctx.session.steps.find((s) => s.id === info.stepId)
+            : undefined;
+
+          const detectCtx: DetectContext = {
+            ...baseCtx,
+            session: ctx.session, // Required by DetectContext
+            page,
+            headless: ctx.options.headless ?? true,
+            stepId: info?.stepId ?? "unknown",
+            payloadValue: info?.payloadValue ?? "",
+            step:
+              currentStep ??
+              ({
+                id: "unknown",
+                type: "browser.wait",
+                duration: 0,
+                timestamp: Date.now(),
+              } as unknown as Step),
+            payloadSet: info?.payloadSet ?? ({} as unknown as RuntimePayload),
+            // Override addFinding to capture locally + globally
+            addFinding: (finding: Finding) => {
+              eventFindings.push(finding);
+              pm.addFinding(finding);
+            },
+            // Override logger to use specific name
+            logger: baseCtx.logger,
+          };
+
+          const finding = await loaded.plugin.hooks.onDialog(dialog, detectCtx);
+          if (finding) {
+            eventFindings.push(finding);
+          }
+        } catch (err) {
+          pm.getErrorHandler().catch(err, {
+            severity: ErrorSeverity.WARN,
+            source: `plugin:${loaded.plugin.name}`,
+            context: { hook: "onDialog" },
+          });
+        }
       }
     }
+
     // Always dismiss dialogs to prevent blocking
     try {
       await dialog.dismiss();
@@ -310,28 +721,61 @@ function createDialogHandler(
 }
 
 function createConsoleHandler(
+  ctx: RunContext,
   eventFindings: Finding[],
   getPayloadInfo: () => CurrentPayloadInfo | null,
 ) {
   return async (msg: ConsoleMessage) => {
     const info = getPayloadInfo();
-    if (info && msg.type() === "log") {
-      const text = msg.text();
-      if (text.includes("vulcn") || text.includes(info.payloadValue)) {
-        eventFindings.push({
-          type: "xss",
-          severity: "high",
-          title: "XSS Confirmed - Console Output",
-          description: `JavaScript console.log was triggered by payload injection`,
-          stepId: info.stepId,
-          payload: info.payloadValue,
-          url: "",
-          evidence: `Console output: ${text}`,
-          metadata: {
-            consoleType: msg.type(),
-            detectionMethod: "console",
-          },
-        });
+    const pm = ctx.pluginManager;
+
+    // Dispatch to plugins
+    for (const loaded of pm.getPlugins()) {
+      if (loaded.enabled && loaded.plugin.hooks?.onConsoleMessage) {
+        try {
+          const baseCtx = pm.createContext(loaded.config, loaded.plugin.name);
+          // Look up step safely
+          const currentStep = info?.stepId
+            ? ctx.session.steps.find((s) => s.id === info.stepId)
+            : undefined;
+
+          const detectCtx: DetectContext = {
+            ...baseCtx,
+            session: ctx.session, // Required by DetectContext
+            page: msg.page(),
+            headless: ctx.options.headless ?? true,
+            stepId: info?.stepId ?? "unknown",
+            payloadValue: info?.payloadValue ?? "",
+            step:
+              currentStep ??
+              ({
+                id: "unknown",
+                type: "browser.wait",
+                duration: 0,
+                timestamp: Date.now(),
+              } as unknown as Step),
+            payloadSet: info?.payloadSet ?? ({} as unknown as RuntimePayload),
+            addFinding: (finding: Finding) => {
+              eventFindings.push(finding);
+              pm.addFinding(finding);
+            },
+            logger: baseCtx.logger,
+          };
+
+          const finding = await loaded.plugin.hooks.onConsoleMessage(
+            msg,
+            detectCtx,
+          );
+          if (finding) {
+            eventFindings.push(finding);
+          }
+        } catch (err) {
+          pm.getErrorHandler().catch(err, {
+            severity: ErrorSeverity.WARN,
+            source: `plugin:${loaded.plugin.name}`,
+            context: { hook: "onConsoleMessage" },
+          });
+        }
       }
     }
   };
@@ -496,8 +940,13 @@ async function replayWithPayload(
           await page.waitForTimeout(browserStep.duration);
           break;
       }
-    } catch {
-      // Step failed, continue to next
+    } catch (err) {
+      // Step-level failures during replay — WARN, not fatal.
+      // A CSS selector may not exist, a page may not respond, etc.
+      // But we still log it so it's visible.
+      console.warn(
+        `[driver:browser] Step replay failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -581,71 +1030,146 @@ async function replayStepsAfter(
   await page.waitForTimeout(500);
 }
 
-// ── Detection Helpers ──────────────────────────────────────────────────
+// ── Plugin Hook Dispatchers ────────────────────────────────────────────
 
 /**
- * Check for payload reflection in page content
+ * Dispatch onAfterPayload hooks to all loaded plugins and collect findings.
+ *
+ * This is the bridge between the browser runner (which handles navigation
+ * and payload injection) and detection plugins (which analyze page state
+ * for vulnerabilities).
  */
-async function checkReflection(
+async function dispatchAfterPayload(
+  ctx: RunContext,
   page: Page,
-  step: Step & { type: "browser.input" },
-  payloadSet: RuntimePayload,
-  payloadValue: string,
-): Promise<Finding | undefined> {
-  const content = await page.content();
+  payload: {
+    step: Step;
+    payloadSet: RuntimePayload;
+    payloadValue: string;
+    stepId: string;
+  },
+): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  const pm = ctx.pluginManager;
 
-  // Check for reflection patterns
-  for (const pattern of payloadSet.detectPatterns) {
-    if (pattern.test(content)) {
-      return {
-        type: payloadSet.category,
-        severity: getSeverity(payloadSet.category),
-        title: `${payloadSet.category.toUpperCase()} vulnerability detected`,
-        description: `Payload pattern was reflected in page content`,
-        stepId: step.id,
-        payload: payloadValue,
-        url: page.url(),
-        evidence: content.match(pattern)?.[0]?.slice(0, 200),
+  for (const loaded of pm.getPlugins()) {
+    if (!loaded.enabled || !loaded.plugin.hooks?.onAfterPayload) continue;
+
+    try {
+      const detectCtx: DetectContext = {
+        session: ctx.session,
+        page,
+        headless: !!(ctx.options as Record<string, unknown>).headless,
+        config: loaded.config,
+        engine: { version: "0.9.2", pluginApiVersion: 1 },
+        payloads: ctx.payloads,
+        findings: ctx.findings,
+        addFinding: ctx.addFinding,
+        logger: {
+          debug: (msg: string, ...args: unknown[]) =>
+            console.debug(`[${loaded.plugin.name}]`, msg, ...args),
+          info: (msg: string, ...args: unknown[]) =>
+            console.info(`[${loaded.plugin.name}]`, msg, ...args),
+          warn: (msg: string, ...args: unknown[]) =>
+            console.warn(`[${loaded.plugin.name}]`, msg, ...args),
+          error: (msg: string, ...args: unknown[]) =>
+            console.error(`[${loaded.plugin.name}]`, msg, ...args),
+        },
+        errors: pm.getErrorHandler(),
+        fetch: globalThis.fetch,
+        step: payload.step,
+        payloadSet: payload.payloadSet,
+        payloadValue: payload.payloadValue,
+        stepId: payload.stepId,
       };
+
+      const result = await loaded.plugin.hooks.onAfterPayload(detectCtx);
+      if (result && result.length > 0) {
+        findings.push(...result);
+      }
+    } catch (err) {
+      pm.getErrorHandler().catch(err, {
+        severity: ErrorSeverity.WARN,
+        source: `plugin:${loaded.plugin.name}`,
+        context: { hook: "onAfterPayload" },
+      });
     }
   }
 
-  // Check if payload appears verbatim
-  if (content.includes(payloadValue)) {
-    return {
-      type: payloadSet.category,
-      severity: "medium",
-      title: `Potential ${payloadSet.category.toUpperCase()} - payload reflection`,
-      description: `Payload was reflected in page without encoding`,
-      stepId: step.id,
-      payload: payloadValue,
-      url: page.url(),
-    };
-  }
-
-  return undefined;
+  return findings;
 }
 
 /**
- * Determine severity based on vulnerability category
+ * Create a response handler that dispatches onNetworkResponse to all plugins.
+ *
+ * Returns a function suitable for page.on('response', handler).
+ * The handler fires asynchronously — findings are added directly via ctx.addFinding.
  */
-function getSeverity(
-  category: PayloadCategory,
-): "critical" | "high" | "medium" | "low" | "info" {
-  switch (category) {
-    case "sqli":
-    case "command-injection":
-    case "xxe":
-      return "critical";
-    case "xss":
-    case "ssrf":
-    case "path-traversal":
-      return "high";
-    case "open-redirect":
-      return "medium";
-    default:
-      return "medium";
-  }
+function createNetworkResponseHandler(
+  ctx: RunContext,
+  _page: Page,
+  getPayloadInfo: () => CurrentPayloadInfo | null,
+): (response: Response) => void {
+  return (response: Response) => {
+    const payloadInfo = getPayloadInfo();
+    if (!payloadInfo) return; // No payload active — skip (e.g. baseline page load)
+
+    // Fire-and-forget — response handlers run async alongside the main loop
+    void (async () => {
+      const pm = ctx.pluginManager;
+      for (const loaded of pm.getPlugins()) {
+        if (!loaded.enabled || !loaded.plugin.hooks?.onNetworkResponse)
+          continue;
+
+        try {
+          const detectCtx: DetectContext = {
+            session: ctx.session,
+            page: _page,
+            headless: !!(ctx.options as Record<string, unknown>).headless,
+            config: loaded.config,
+            engine: { version: "0.9.2", pluginApiVersion: 1 },
+            payloads: ctx.payloads,
+            findings: ctx.findings,
+            addFinding: ctx.addFinding,
+            logger: {
+              debug: (msg: string, ...args: unknown[]) =>
+                console.debug(`[${loaded.plugin.name}]`, msg, ...args),
+              info: (msg: string, ...args: unknown[]) =>
+                console.info(`[${loaded.plugin.name}]`, msg, ...args),
+              warn: (msg: string, ...args: unknown[]) =>
+                console.warn(`[${loaded.plugin.name}]`, msg, ...args),
+              error: (msg: string, ...args: unknown[]) =>
+                console.error(`[${loaded.plugin.name}]`, msg, ...args),
+            },
+            errors: pm.getErrorHandler(),
+            fetch: globalThis.fetch,
+            step: {
+              id: payloadInfo.stepId,
+              type: "browser.navigate",
+              timestamp: Date.now(),
+            },
+            payloadSet: payloadInfo.payloadSet,
+            payloadValue: payloadInfo.payloadValue,
+            stepId: payloadInfo.stepId,
+          };
+
+          const finding = await loaded.plugin.hooks.onNetworkResponse(
+            response,
+            detectCtx,
+          );
+          if (finding) {
+            ctx.addFinding(finding);
+          }
+        } catch (err) {
+          pm.getErrorHandler().catch(err, {
+            severity: ErrorSeverity.WARN,
+            source: `plugin:${loaded.plugin.name}`,
+            context: { hook: "onNetworkResponse" },
+          });
+        }
+      }
+    })();
+  };
 }
 
 // ── Payload Interleaving ───────────────────────────────────────────────

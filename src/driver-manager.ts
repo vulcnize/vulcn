@@ -6,13 +6,16 @@
  */
 
 import { isAbsolute, resolve } from "node:path";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+export const { version: ENGINE_VERSION } = require("../package.json");
 import { parse, stringify } from "yaml";
 import type {
   VulcnDriver,
   LoadedDriver,
   DriverSource,
   Session,
-  Step,
   RunContext,
   RunResult,
   RunOptions,
@@ -26,6 +29,7 @@ import type { PluginManager } from "./plugin-manager";
 import type { Finding } from "./types";
 import type { RuntimePayload } from "./payload-types";
 import type { ScanContext } from "./plugin-types";
+import { ErrorSeverity, VulcnError } from "./errors";
 
 /**
  * Driver Manager - loads and manages recording/running drivers
@@ -134,53 +138,20 @@ export class DriverManager {
   /**
    * Parse a YAML session string into a Session object.
    *
-   * Handles both new driver-format sessions and legacy v1 sessions.
-   * Legacy sessions (those with non-namespaced step types like "click",
-   * "input", "navigate") are automatically converted to the driver format
-   * (e.g., "browser.click", "browser.input", "browser.navigate").
+   * Sessions must use the driver format with a `driver` field.
    *
    * @param yaml - Raw YAML string
-   * @param defaultDriver - Driver to assign for legacy sessions (default: "browser")
    */
-  parseSession(yaml: string, defaultDriver = "browser"): Session {
+  parseSession(yaml: string): Session {
     const data = parse(yaml) as Record<string, unknown>;
 
-    // Already in driver format — has a `driver` field
-    if (data.driver && typeof data.driver === "string") {
-      return data as unknown as Session;
+    if (!data.driver || typeof data.driver !== "string") {
+      throw new Error(
+        "Invalid session format: missing 'driver' field. Sessions must use the driver format.",
+      );
     }
 
-    // Legacy format — convert to driver session
-    const steps = (data.steps as Array<Record<string, unknown>>) ?? [];
-    const convertedSteps: Step[] = steps.map((step) => {
-      const type = step.type as string;
-
-      // If step type is already namespaced (e.g. "browser.click"), keep it
-      if (type.includes(".")) {
-        return step as unknown as Step;
-      }
-
-      // Convert legacy type → namespaced type
-      return {
-        ...step,
-        type: `${defaultDriver}.${type}`,
-      } as unknown as Step;
-    });
-
-    return {
-      name: (data.name as string) ?? "Untitled Session",
-      driver: defaultDriver,
-      driverConfig: {
-        browser: data.browser ?? "chromium",
-        viewport: data.viewport ?? { width: 1280, height: 720 },
-        startUrl: data.startUrl as string,
-      },
-      steps: convertedSteps,
-      metadata: {
-        recordedAt: data.recordedAt as string,
-        version: (data.version as string) ?? "1",
-      },
-    };
+    return data as unknown as Session;
   }
 
   /**
@@ -260,11 +231,12 @@ export class DriverManager {
       page: null as unknown,
       headless: !!(options as Record<string, unknown>).headless,
       config: {} as Record<string, unknown>,
-      engine: { version: "0.3.0", pluginApiVersion: 1 },
+      engine: { version: ENGINE_VERSION, pluginApiVersion: 1 },
       payloads: pluginManager.getPayloads(),
       findings,
       addFinding,
       logger,
+      errors: pluginManager.getErrorHandler(),
       fetch: globalThis.fetch,
     };
 
@@ -275,6 +247,7 @@ export class DriverManager {
       findings,
       addFinding,
       logger,
+      errors: pluginManager.getErrorHandler(),
       options: {
         ...options,
         // Provide onPageReady callback — fires plugin onRunStart hooks
@@ -290,9 +263,11 @@ export class DriverManager {
                   config: loaded.config,
                 });
               } catch (err) {
-                logger.warn(
-                  `Plugin ${loaded.plugin.name} onRunStart failed: ${err}`,
-                );
+                pluginManager.getErrorHandler().catch(err, {
+                  severity: ErrorSeverity.ERROR,
+                  source: `plugin:${loaded.plugin.name}`,
+                  context: { hook: "onRunStart" },
+                });
               }
             }
           }
@@ -307,9 +282,11 @@ export class DriverManager {
                   config: loaded.config,
                 });
               } catch (err) {
-                logger.warn(
-                  `Plugin ${loaded.plugin.name} onBeforeClose failed: ${err}`,
-                );
+                pluginManager.getErrorHandler().catch(err, {
+                  severity: ErrorSeverity.WARN,
+                  source: `plugin:${loaded.plugin.name}`,
+                  context: { hook: "onBeforeClose" },
+                });
               }
             }
           }
@@ -331,7 +308,12 @@ export class DriverManager {
             findings: result.findings,
           });
         } catch (err) {
-          logger.warn(`Plugin ${loaded.plugin.name} onRunEnd failed: ${err}`);
+          // onRunEnd is FATAL — report generation lives here.
+          pluginManager.getErrorHandler().catch(err, {
+            severity: ErrorSeverity.FATAL,
+            source: `plugin:${loaded.plugin.name}`,
+            context: { hook: "onRunEnd" },
+          });
         }
       }
     }
@@ -383,27 +365,29 @@ export class DriverManager {
     const firstDriver = this.getForSession(sessions[0]);
     let sharedBrowser: unknown = null;
 
-    // Only share browser for browser driver
-    if (firstDriver.name === "browser") {
+    // Only share browser/resource if the driver supports it
+    if (typeof firstDriver.createSharedResource === "function") {
       try {
-        // Dynamic import to avoid hard dependency on driver-browser
-        // Use variable to bypass TS module resolution (engine doesn't depend on driver-browser)
-        const driverPkg = "@vulcn/driver-browser";
-        const { launchBrowser } = await import(/* @vite-ignore */ driverPkg);
-        const browserType =
-          (sessions[0].driverConfig.browser as string) ?? "chromium";
-        const headless = options.headless ?? true;
-        const result = await launchBrowser({
-          browser: browserType as "chromium" | "firefox" | "webkit",
-          headless,
+        // Use the first session's config as the baseline for the shared resource
+        const driverConfig = sessions[0].driverConfig;
+        sharedBrowser = await firstDriver.createSharedResource(
+          driverConfig,
+          options,
+        );
+      } catch (err) {
+        // Can't share resource — warn and fall back to per-session launches
+        pluginManager.getErrorHandler().catch(err, {
+          severity: ErrorSeverity.WARN,
+          source: `driver-manager:${firstDriver.name}`,
+          context: { action: "create-shared-resource" },
         });
-        sharedBrowser = result.browser;
-      } catch {
-        // If we can't launch a shared browser, fall back to per-session
       }
     }
 
     try {
+      // Auto-init plugins if not already initialized (idempotent)
+      await pluginManager.initialize();
+
       // Fire onScanStart hooks
       await pluginManager.callHook("onScanStart", async (hook, ctx) => {
         const scanCtx: ScanContext = {
@@ -415,22 +399,81 @@ export class DriverManager {
         await (hook as (ctx: ScanContext) => Promise<void>)(scanCtx);
       });
 
-      for (const session of sessions) {
+      for (let i = 0; i < sessions.length; i++) {
+        const session = sessions[i];
+
+        // Clear per-session state so findings don't leak across sessions
+        pluginManager.clearFindings();
+
+        // Notify consumers before session starts
+        options.onSessionStart?.(session, i, sessions.length);
+
         const sessionOptions: RunOptions = {
           ...options,
           ...(sharedBrowser ? { browser: sharedBrowser } : {}),
         };
 
-        const result = await this.execute(
-          session,
-          pluginManager,
-          sessionOptions,
-        );
+        let result: RunResult;
+
+        if (options.timeout && options.timeout > 0) {
+          // Race execution against timeout
+          const execPromise = this.execute(
+            session,
+            pluginManager,
+            sessionOptions,
+          );
+          const timeoutPromise = new Promise<RunResult>((_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    `Session "${session.name}" timed out after ${options.timeout}ms`,
+                  ),
+                ),
+              options.timeout,
+            ),
+          );
+
+          try {
+            result = await Promise.race([execPromise, timeoutPromise]);
+          } catch (err) {
+            // Timeout or execution error — record as failed session
+            result = {
+              findings: [],
+              stepsExecuted: 0,
+              payloadsTested: 0,
+              duration: options.timeout!,
+              errors: [err instanceof Error ? err.message : String(err)],
+            };
+          }
+
+          // Prevent unhandled rejection from the losing promise in the race.
+          // When timeout wins, execute() is still running — its eventual
+          // rejection must be absorbed or Node exits with code 1.
+          execPromise.catch(() => {});
+        } else {
+          try {
+            result = await this.execute(session, pluginManager, sessionOptions);
+          } catch (err) {
+            // Execution error — record as failed session, continue with next
+            result = {
+              findings: [],
+              stepsExecuted: 0,
+              payloadsTested: 0,
+              duration: 0,
+              errors: [err instanceof Error ? err.message : String(err)],
+            };
+          }
+        }
+
         results.push(result);
         allFindings.push(...result.findings);
         totalSteps += result.stepsExecuted;
         totalPayloads += result.payloadsTested;
         allErrors.push(...result.errors);
+
+        // Notify consumers after session ends
+        options.onSessionEnd?.(session, result, i, sessions.length);
       }
     } finally {
       // Close the shared browser
@@ -452,6 +495,7 @@ export class DriverManager {
     };
 
     // Fire onScanEnd hooks — allows plugins to transform the aggregate result
+    // This MUST run even if sessions failed — it's how the report gets written.
     let finalAggregate = aggregate;
     finalAggregate = await pluginManager.callHookPipe(
       "onScanEnd",

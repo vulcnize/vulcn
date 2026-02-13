@@ -27,6 +27,8 @@ import type {
   PayloadCategory,
   CapturedRequest,
 } from "@vulcn/engine";
+import { getSeverity } from "@vulcn/engine";
+import { checkReflection } from "./reflection";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -123,7 +125,19 @@ export async function httpScan(
           });
           requestsSent++;
 
-          const finding = checkHttpReflection(body, request, payloadSet, value);
+          const finding = checkReflection({
+            content: body,
+            payloadSet,
+            payloadValue: value,
+            stepId: `http-${request.sessionName}`,
+            url: request.url,
+            metadata: {
+              detectionMethod: "tier1-http",
+              needsBrowserConfirmation: true,
+              requestMethod: request.method,
+              injectableField: request.injectableField,
+            },
+          });
           if (finding) {
             findings.push(finding);
             reflectedRequests.push({
@@ -330,90 +344,6 @@ function injectIntoMultipart(
     "i",
   );
   return body.replace(regex, `$1${payload}`);
-}
-
-// ── Reflection Detection ───────────────────────────────────────────────
-
-/**
- * Check HTTP response body for payload reflection.
- *
- * This mirrors the browser runner's `checkReflection` but works on raw
- * HTTP response text. Results are marked with `detectionMethod: "tier1-http"`
- * in metadata to distinguish from browser-confirmed findings.
- */
-function checkHttpReflection(
-  responseBody: string,
-  request: CapturedRequest,
-  payloadSet: RuntimePayload,
-  payloadValue: string,
-): Finding | undefined {
-  // Check detect patterns from the payload set
-  for (const pattern of payloadSet.detectPatterns) {
-    if (pattern.test(responseBody)) {
-      return {
-        type: payloadSet.category,
-        severity: getSeverity(payloadSet.category),
-        title: `${payloadSet.category.toUpperCase()} reflection detected (HTTP)`,
-        description: `Payload pattern was reflected in HTTP response body. Needs browser confirmation for execution proof.`,
-        stepId: `http-${request.sessionName}`,
-        payload: payloadValue,
-        url: request.url,
-        evidence: responseBody.match(pattern)?.[0]?.slice(0, 200),
-        metadata: {
-          detectionMethod: "tier1-http",
-          needsBrowserConfirmation: true,
-          requestMethod: request.method,
-          injectableField: request.injectableField,
-        },
-      };
-    }
-  }
-
-  // Check if payload appears verbatim in response
-  if (responseBody.includes(payloadValue)) {
-    return {
-      type: payloadSet.category,
-      severity: "medium",
-      title: `Potential ${payloadSet.category.toUpperCase()} — payload reflected in HTTP response`,
-      description: `Payload was reflected in HTTP response without encoding. Escalate to browser for execution proof.`,
-      stepId: `http-${request.sessionName}`,
-      payload: payloadValue,
-      url: request.url,
-      metadata: {
-        detectionMethod: "tier1-http",
-        needsBrowserConfirmation: true,
-        requestMethod: request.method,
-        injectableField: request.injectableField,
-      },
-    };
-  }
-
-  return undefined;
-}
-
-// ── Severity ───────────────────────────────────────────────────────────
-
-/**
- * Determine severity based on vulnerability category.
- * Mirrors the browser runner's getSeverity().
- */
-function getSeverity(
-  category: PayloadCategory,
-): "critical" | "high" | "medium" | "low" | "info" {
-  switch (category) {
-    case "sqli":
-    case "command-injection":
-    case "xxe":
-      return "critical";
-    case "xss":
-    case "ssrf":
-    case "path-traversal":
-      return "high";
-    case "open-redirect":
-      return "medium";
-    default:
-      return "medium";
-  }
 }
 
 // ── Utility: Build CapturedRequests from Crawler Data ──────────────────

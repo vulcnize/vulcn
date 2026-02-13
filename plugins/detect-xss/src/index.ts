@@ -139,6 +139,7 @@ const plugin: VulcnPlugin = {
 
       return {
         type: "xss",
+        cwe: "CWE-79",
         severity: config.severity,
         title: `XSS Confirmed: ${dialogType}() executed`,
         description: `JavaScript ${dialogType}() dialog was triggered, proving XSS execution. Message: "${message}"`,
@@ -184,6 +185,7 @@ const plugin: VulcnPlugin = {
 
       return {
         type: "xss",
+        cwe: "CWE-79",
         severity: config.severity,
         title: "XSS Confirmed: Console marker detected",
         description: `JavaScript console.log() with XSS marker was executed, proving code injection. Marker: "${text}"`,
@@ -245,6 +247,7 @@ const plugin: VulcnPlugin = {
           );
           findings.push({
             type: "xss",
+            cwe: "CWE-79",
             severity: "medium", // Lower confidence than dialog detection
             title: "Potential XSS: Suspicious script elements detected",
             description: `Found ${scriptCount} script element(s) with suspicious content that may indicate DOM-based XSS`,

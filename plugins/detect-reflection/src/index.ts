@@ -111,6 +111,31 @@ type ReflectionContext =
   | "comment"
   | "unknown";
 
+// ── Encoding-awareness ────────────────────────────────────────────────
+
+/** Characters that are dangerous in HTML contexts */
+const DANGEROUS_HTML_CHARS = ["<", ">", '"', "'"];
+
+/** HTML entity equivalents */
+const HTML_ENTITY_MAP: Record<string, string[]> = {
+  "<": ["&lt;", "&#60;", "&#x3c;", "&#x3C;"],
+  ">": ["&gt;", "&#62;", "&#x3e;", "&#x3E;"],
+  '"': ["&quot;", "&#34;", "&#x22;"],
+  "'": ["&#39;", "&#x27;", "&apos;"],
+};
+
+// Check if a payload's dangerous characters are HTML-encoded in the raw source.
+// Returns true if the reflection is safely sanitized.
+function isHtmlEncoded(payload: string, rawContent: string): boolean {
+  // 1. If the raw string exists verbatim, it is definitely NOT encoded.
+  if (rawContent.includes(payload)) return false;
+
+  // 2. If the verbatim payload is NOT in the raw HTML, but we know it appeared
+  // in the parsed DOM (caller ensures this), then it MUST have been encoded
+  // (e.g., < became &lt;) or transformed by JS.
+  return true;
+}
+
 /**
  * Analyze where in the HTML the reflection occurred
  */
@@ -220,6 +245,46 @@ const plugin: VulcnPlugin = {
         // Get page HTML content (cast from unknown to Playwright Page)
         const page = ctx.page as Page;
         const html = await page.content();
+
+        // ── Skip harmless payloads ───────────────────────────────────
+        // Payloads without dangerous HTML characters (like `alert(1)`)
+        // can never exploit reflection for XSS. Seeing them echoed as
+        // plain text is normal behaviour, not a vulnerability.
+        const hasDangerousChars = DANGEROUS_HTML_CHARS.some((c) =>
+          payload.includes(c),
+        );
+
+        if (!hasDangerousChars) {
+          return findings;
+        }
+
+        // ── Encoding-aware suppression ────────────────────────────
+        // At this point we know the payload has dangerous chars.
+        // Check if they're properly encoded in the raw HTTP source.
+        {
+          let rawContent: string | undefined;
+          try {
+            const context = page.context();
+            const cookies = await context.cookies();
+            const cookieHeader = cookies
+              .map((c) => `${c.name}=${c.value}`)
+              .join("; ");
+            const res = await fetch(page.url(), {
+              headers: { Cookie: cookieHeader },
+            });
+            if (res.ok) rawContent = await res.text();
+          } catch {
+            // Fetch failed — skip encoding check
+            ctx.logger.debug(`Failed to fetch raw content for encoding check`);
+          }
+
+          if (rawContent && isHtmlEncoded(payload, rawContent)) {
+            ctx.logger.debug(
+              `Reflection suppressed — payload is HTML-encoded in raw source`,
+            );
+            return findings; // All encoded → safe
+          }
+        }
 
         // Search for all occurrences of the payload
         let searchIndex = 0;

@@ -10,6 +10,7 @@
 import type { z } from "zod";
 import type { Session, Step } from "./driver-types";
 import type { Finding } from "./types";
+import type { ErrorHandler } from "./errors";
 import type { RunResult } from "./driver-types";
 import type { RuntimePayload, PayloadCategory } from "./payload-types";
 
@@ -189,7 +190,7 @@ export interface EngineInfo {
  * Base context available to all plugin hooks
  */
 export interface PluginContext {
-  /** Plugin-specific config from vulcn.config.yml */
+  /** Plugin-specific configuration */
   config: Record<string, unknown>;
 
   /** Engine information */
@@ -210,6 +211,14 @@ export interface PluginContext {
 
   /** Scoped logger */
   logger: PluginLogger;
+
+  /**
+   * Centralized error handler.
+   * Plugins MUST use this to surface errors instead of swallowing them:
+   *   ctx.errors.fatal("can't write report", "plugin:report", { cause: err })
+   *   ctx.errors.warn("optional feature unavailable", "plugin:passive")
+   */
+  errors: ErrorHandler;
 
   /** Fetch API for network requests */
   fetch: typeof fetch;
@@ -266,37 +275,6 @@ export interface DetectContext extends RunContext {
 
   /** Step ID for reporting */
   stepId: string;
-}
-
-/**
- * Plugin configuration in vulcn.config.yml
- */
-export interface PluginConfig {
-  /** Plugin name/path */
-  name: string;
-
-  /** Plugin-specific configuration */
-  config?: Record<string, unknown>;
-
-  /** Whether plugin is enabled (default: true) */
-  enabled?: boolean;
-}
-
-/**
- * Vulcn configuration file schema
- */
-export interface VulcnConfig {
-  /** Config version */
-  version: string;
-
-  /** Plugins to load */
-  plugins?: PluginConfig[];
-
-  /** Global settings */
-  settings?: {
-    headless?: boolean;
-    timeout?: number;
-  };
 }
 
 /**

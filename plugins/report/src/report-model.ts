@@ -338,7 +338,18 @@ function passiveCat(f: Finding): string | undefined {
  * Enrich a raw Finding with CWE, fingerprint, classification.
  */
 function enrichFinding(f: Finding): EnrichedFinding {
-  const cwe = CWE_MAP[f.type] || CWE_MAP.custom;
+  // Prefer the finding's top-level CWE field (e.g., "CWE-79") when set by plugins,
+  // falling back to the type-based CWE_MAP lookup for backwards compatibility.
+  let cwe: CweEntry;
+  if (f.cwe) {
+    const cweId = parseInt(f.cwe.replace(/^CWE-/i, ""), 10);
+    cwe =
+      CWE_MAP[f.type]?.id === cweId
+        ? CWE_MAP[f.type]
+        : { id: cweId, name: CWE_MAP[f.type]?.name || `CWE-${cweId}` };
+  } else {
+    cwe = CWE_MAP[f.type] || CWE_MAP.custom;
+  }
   const sev = f.severity as Severity;
 
   return {

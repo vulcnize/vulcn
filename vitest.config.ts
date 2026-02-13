@@ -17,6 +17,7 @@ export default defineConfig({
       "test/**/*.test.ts",
       "plugins/**/*.test.ts",
       "drivers/**/*.test.ts",
+      "benchmarks/**/*.test.ts",
     ],
     exclude: ["**/node_modules/**", "**/dist/**"],
     setupFiles: ["test/setup.ts"],
