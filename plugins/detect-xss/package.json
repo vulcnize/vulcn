@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/plugin-detect-xss",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Execution-based XSS detection plugin for Vulcn — detects real JavaScript execution (alert, confirm, console) rather than pattern matching, for accurate cross-site scripting vulnerability identification.",
   "type": "module",
   "main": "./dist/index.cjs",
