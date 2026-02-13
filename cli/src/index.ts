@@ -7,73 +7,182 @@ import { storeCommand } from "./store";
 import { payloadsCommand } from "./payloads";
 import { installCommand, doctorCommand } from "./install";
 import { initCommand } from "./init";
-import {
-  pluginListCommand,
-  pluginAddCommand,
-  pluginRemoveCommand,
-  pluginEnableCommand,
-  pluginDisableCommand,
-} from "./plugin";
 
 const program = new Command();
 
 program
   .name("vulcn")
   .description("Security testing recorder & runner")
-  .version("0.4.0")
+  .version("0.5.0")
   .addHelpText(
     "after",
     `
 ${chalk.cyan.bold("Quick Start:")}
-  ${chalk.gray("$")} vulcn init                                  ${chalk.gray("Create config file")}
-  ${chalk.gray("$")} vulcn record https://example.com             ${chalk.gray("Record browser session")}
-  ${chalk.gray("$")} vulcn crawl https://example.com              ${chalk.gray("Auto-discover forms & inputs")}
-  ${chalk.gray("$")} vulcn run session.vulcn.yml                  ${chalk.gray("Run with default payloads")}
-  ${chalk.gray("$")} vulcn run session.vulcn.yml -p xss sqli     ${chalk.gray("Run with specific payloads")}
+  ${chalk.gray("$")} vulcn init https://example.com             ${chalk.gray("Create project")}
+  ${chalk.gray("$")} vulcn crawl                                ${chalk.gray("Auto-discover forms & inputs")}
+  ${chalk.gray("$")} vulcn run                                  ${chalk.gray("Run security tests")}
+
+${chalk.cyan.bold("Manual Recording:")}
+  ${chalk.gray("$")} vulcn record                               ${chalk.gray("Record browser session")}
+  ${chalk.gray("$")} vulcn run                                  ${chalk.gray("Run with recorded sessions")}
 
 ${chalk.cyan.bold("Authenticated Scans:")}
-  ${chalk.gray("$")} vulcn store admin password123                ${chalk.gray("Store credentials (encrypted)")}
-  ${chalk.gray("$")} vulcn crawl https://dvwa.local --creds       ${chalk.gray("Auth-crawl with stored creds")}
-  ${chalk.gray("$")} vulcn run dvwa.vulcn/                        ${chalk.gray("Run (auto-uses auth state)")}
+  ${chalk.gray("$")} vulcn store admin password123               ${chalk.gray("Store credentials (encrypted)")}
+  ${chalk.gray("$")} vulcn crawl                                ${chalk.gray("Crawl with auth (auto-detected)")}
+  ${chalk.gray("$")} vulcn run                                  ${chalk.gray("Run with auth (auto-detected)")}
+
+${chalk.cyan.bold("Project Structure:")}
+  ${chalk.gray(".vulcn.yml")}      ${chalk.gray("← config (single source of truth)")}
+  ${chalk.gray("sessions/")}       ${chalk.gray("← recorded/crawled sessions")}
+  ${chalk.gray("auth/")}           ${chalk.gray("← encrypted credentials")}
+  ${chalk.gray("reports/")}        ${chalk.gray("← generated reports")}
 
 ${chalk.cyan.bold("Docs:")} https://docs.vulcn.dev
 `,
   );
 
+// vulcn init
+program
+  .command("init")
+  .description("Create .vulcn.yml project config")
+  .argument("[url]", "Target URL to scan")
+  .option("-f, --force", "Overwrite existing config file")
+  .addHelpText(
+    "after",
+    `
+${chalk.cyan.bold("Examples:")}
+  ${chalk.gray("$")} vulcn init                       ${chalk.gray("Create with defaults")}
+  ${chalk.gray("$")} vulcn init https://dvwa.local     ${chalk.gray("Create with target pre-filled")}
+  ${chalk.gray("$")} vulcn init --force                ${chalk.gray("Overwrite existing config")}
+`,
+  )
+  .action(initCommand);
+
 // vulcn record
 program
   .command("record")
   .description("Record browser interactions")
-  .argument("<url>", "Starting URL to record from")
-  .option("-o, --output <file>", "Output file path", "session.vulcn.yml")
+  .argument("[url]", "Target URL (overrides .vulcn.yml)")
+  .option("-o, --output <file>", "Output filename (saved to sessions/)")
   .option(
     "-b, --browser <browser>",
     "Browser to use (chromium, firefox, webkit)",
-    "chromium",
   )
-  .option("--headless", "Run in headless mode", false)
+  .option("--headless", "Run in headless mode")
   .addHelpText(
     "after",
     `
-${chalk.cyan.bold("Browsers:")}
-  chromium       ${chalk.gray("Google Chrome / Chromium (default)")}
-  firefox        ${chalk.gray("Mozilla Firefox")}
-  webkit         ${chalk.gray("Apple Safari / WebKit")}
+${chalk.cyan.bold("How it works:")}
+  1. Reads target URL from ${chalk.white(".vulcn.yml")} (or CLI arg)
+  2. Opens the browser and records every interaction
+  3. Press ${chalk.white("Ctrl+C")} to stop and save to ${chalk.white("sessions/")}
+  4. Run ${chalk.white("vulcn run")} to replay with security payloads
 
 ${chalk.cyan.bold("Examples:")}
-  ${chalk.gray("$")} vulcn record https://example.com
-  ${chalk.gray("$")} vulcn record https://example.com -o login-flow.vulcn.yml
-  ${chalk.gray("$")} vulcn record https://example.com -b firefox
-  ${chalk.gray("$")} vulcn record https://example.com --headless
-
-${chalk.cyan.bold("How it works:")}
-  1. Opens the target URL in a browser
-  2. Records every interaction (clicks, typing, navigation)
-  3. Press ${chalk.white("Ctrl+C")} to stop and save the session file
-  4. Use ${chalk.white("vulcn run")} to replay with security payloads
+  ${chalk.gray("$")} vulcn record                               ${chalk.gray("Target from .vulcn.yml")}
+  ${chalk.gray("$")} vulcn record https://dvwa.local             ${chalk.gray("Override target")}
+  ${chalk.gray("$")} vulcn record -b firefox                     ${chalk.gray("Use Firefox")}
 `,
   )
   .action(recordCommand);
+
+// vulcn crawl
+program
+  .command("crawl")
+  .description("Auto-discover forms and injection points")
+  .argument("[url]", "Target URL (overrides .vulcn.yml)")
+  .option("-d, --depth <n>", "Maximum crawl depth")
+  .option("-m, --max-pages <n>", "Maximum pages to visit")
+  .option("-b, --browser <browser>", "Browser to use")
+  .option("--headless", "Run in headless mode", true)
+  .option("--no-headless", "Run with visible browser")
+  .option("--no-same-origin", "Allow following cross-origin links")
+  .option("-t, --timeout <ms>", "Page timeout in ms")
+  .option("--run", "Auto-run scan after crawl")
+  .addHelpText(
+    "after",
+    `
+${chalk.cyan.bold("How it works:")}
+  1. Reads target from ${chalk.white(".vulcn.yml")} and crawl settings
+  2. Visits pages and discovers forms & injectable inputs
+  3. Saves sessions to ${chalk.white("sessions/")}
+  4. Optionally chains into ${chalk.white("vulcn run")} with ${chalk.white("--run")}
+
+${chalk.cyan.bold("Examples:")}
+  ${chalk.gray("$")} vulcn crawl                                ${chalk.gray("Target from .vulcn.yml")}
+  ${chalk.gray("$")} vulcn crawl https://dvwa.local             ${chalk.gray("Override target")}
+  ${chalk.gray("$")} vulcn crawl -d 3 -m 50                     ${chalk.gray("Deep crawl")}
+  ${chalk.gray("$")} vulcn crawl --run                           ${chalk.gray("Crawl then scan")}
+  ${chalk.gray("$")} vulcn crawl --no-headless                   ${chalk.gray("Visible browser")}
+`,
+  )
+  .action((url: string | undefined, opts: Record<string, unknown>) => {
+    crawlCommand(url, {
+      depth: opts.depth ? parseInt(opts.depth as string, 10) : undefined,
+      maxPages: opts.maxPages
+        ? parseInt(opts.maxPages as string, 10)
+        : undefined,
+      browser: opts.browser as string | undefined,
+      headless: opts.headless as boolean | undefined,
+      timeout: opts.timeout ? parseInt(opts.timeout as string, 10) : undefined,
+      sameOrigin: opts.sameOrigin as boolean | undefined,
+      run: opts.run as boolean | undefined,
+    });
+  });
+
+// vulcn run
+program
+  .command("run")
+  .description("Run security tests")
+  .option("-p, --payload <names...>", "Payload types (overrides .vulcn.yml)")
+  .option(
+    "-f, --payload-file <file>",
+    "Load custom payloads from YAML/JSON file",
+  )
+  .option("-b, --browser <browser>", "Browser (overrides .vulcn.yml)")
+  .option("--headless", "Run in headless mode")
+  .option("--no-headless", "Run with visible browser")
+  .option(
+    "-r, --report <format>",
+    "Report format (overrides .vulcn.yml): html, json, yaml, sarif, all",
+  )
+  .option("--report-output <dir>", "Output directory for reports")
+  .option("--passive", "Enable passive scanner (overrides .vulcn.yml)")
+  .option("--no-passive", "Disable passive scanner")
+  .option("--payloadbox", "Also load PayloadsAllTheThings payloads", false)
+  .addHelpText(
+    "after",
+    `
+${chalk.cyan.bold("How it works:")}
+  1. Reads all config from ${chalk.white(".vulcn.yml")}
+  2. Loads sessions from ${chalk.white("sessions/")}
+  3. CLI flags override config values for this run only
+  4. Auto-discovers auth from ${chalk.white("auth/state.enc")}
+  5. Saves reports to ${chalk.white("reports/")}
+
+${chalk.cyan.bold("Payload Types:")} ${chalk.gray("(curated context-aware payloads)")}
+  ${chalk.red("xss")}                ${chalk.gray("Cross-Site Scripting")}
+  ${chalk.magenta("sqli")}               ${chalk.gray("SQL Injection")}
+  ${chalk.cyan("xxe")}                ${chalk.gray("XML External Entity")}
+  ${chalk.yellow("cmd")}                ${chalk.gray("OS Command Injection")}
+  ${chalk.white("redirect")}           ${chalk.gray("Open Redirect")}
+  ${chalk.green("traversal")}          ${chalk.gray("Path Traversal")}
+
+${chalk.cyan.bold("Report Formats:")}
+  html               ${chalk.gray("Interactive HTML report")}
+  json               ${chalk.gray("Machine-readable JSON")}
+  yaml               ${chalk.gray("Human-readable YAML")}
+  sarif              ${chalk.gray("SARIF v2.1.0 for CI/CD")}
+  all                ${chalk.gray("All formats")}
+
+${chalk.cyan.bold("Examples:")}
+  ${chalk.gray("$")} vulcn run                                  ${chalk.gray("Uses .vulcn.yml config")}
+  ${chalk.gray("$")} vulcn run -p xss sqli                      ${chalk.gray("Override payload types")}
+  ${chalk.gray("$")} vulcn run --no-headless                     ${chalk.gray("Visible browser")}
+  ${chalk.gray("$")} vulcn run -r sarif                          ${chalk.gray("SARIF report for CI")}
+`,
+  )
+  .action(runCommand);
 
 // vulcn store
 program
@@ -85,142 +194,28 @@ program
     "--header <header>",
     'Header auth (e.g., "Authorization: Bearer xyz")',
   )
-  .option("-o, --output <file>", "Output file path", ".vulcn/auth.enc")
   .option(
     "--passphrase <passphrase>",
     "Encryption passphrase (or set VULCN_KEY)",
   )
-  .option("--login-url <url>", "Custom login URL")
-  .option("--user-field <selector>", "Custom CSS selector for username field")
-  .option("--pass-field <selector>", "Custom CSS selector for password field")
-  .addHelpText(
-    "after",
-    `
-${chalk.cyan.bold("Examples:")}
-  ${chalk.gray("$")} vulcn store admin password123
-  ${chalk.gray("$")} vulcn store admin password123 --login-url https://dvwa.local/login
-  ${chalk.gray("$")} vulcn store --header "Authorization: Bearer abc123"
-  ${chalk.gray("$")} VULCN_KEY=mykey vulcn store admin pass     ${chalk.gray("CI/CD (no prompt)")}
-`,
-  )
-  .action(storeCommand);
-
-// vulcn crawl
-program
-  .command("crawl")
-  .description("Auto-discover forms and injection points")
-  .argument("<url>", "Target URL to crawl")
-  .option(
-    "-o, --output <dir>",
-    "Output directory for session files",
-    "./sessions",
-  )
-  .option("-d, --depth <n>", "Maximum crawl depth", "2")
-  .option("-m, --max-pages <n>", "Maximum pages to visit", "20")
-  .option("-b, --browser <browser>", "Browser to use", "chromium")
-  .option("--headless", "Run in headless mode", true)
-  .option("--no-headless", "Run with visible browser")
-  .option("-t, --timeout <ms>", "Page timeout in ms", "10000")
-  .option("--no-same-origin", "Allow following cross-origin links")
-  .option(
-    "--creds <file>",
-    "Credentials file for authenticated crawling",
-    ".vulcn/auth.enc",
-  )
-  .option(
-    "--run-after <payloads...>",
-    "Auto-run scans after crawl with these payloads",
-  )
+  .option("--login-url <url>", "Custom login URL (overrides .vulcn.yml)")
+  .option("--user-field <selector>", "CSS selector for username field")
+  .option("--pass-field <selector>", "CSS selector for password field")
   .addHelpText(
     "after",
     `
 ${chalk.cyan.bold("How it works:")}
-  1. Visits the target URL and discovers all links
-  2. Follows links up to ${chalk.white("--depth")} levels deep
-  3. Discovers forms and injectable inputs on each page
-  4. Generates a ${chalk.white(".vulcn.yml")} session file per form
-  5. Optionally chains into ${chalk.white("vulcn run")} with ${chalk.white("--run-after")}
+  1. Encrypts credentials with AES-256-GCM
+  2. Saves to ${chalk.white("auth/state.enc")} next to ${chalk.white(".vulcn.yml")}
+  3. ${chalk.white("vulcn crawl")} and ${chalk.white("vulcn run")} auto-discover auth
 
 ${chalk.cyan.bold("Examples:")}
-  ${chalk.gray("$")} vulcn crawl https://example.com
-  ${chalk.gray("$")} vulcn crawl https://example.com -d 3 -m 50
-  ${chalk.gray("$")} vulcn crawl https://example.com -o ./scans
-  ${chalk.gray("$")} vulcn crawl https://example.com --no-headless
-  ${chalk.gray("$")} vulcn crawl https://example.com --run-after xss sqli
-
-${chalk.cyan.bold("Benchmarking:")}
-  ${chalk.gray("$")} docker run -d -p 3000:3000 bkimminich/juice-shop
-  ${chalk.gray("$")} vulcn crawl http://localhost:3000 -d 3 --run-after xss sqli -r html
+  ${chalk.gray("$")} vulcn store admin password123               ${chalk.gray("Form auth")}
+  ${chalk.gray("$")} vulcn store --header "Authorization: Bearer abc"
+  ${chalk.gray("$")} VULCN_KEY=mykey vulcn store admin pass     ${chalk.gray("CI/CD (no prompt)")}
 `,
   )
-  .action((url: string, opts: Record<string, unknown>) => {
-    crawlCommand(url, {
-      output: opts.output as string,
-      depth: parseInt(opts.depth as string, 10),
-      maxPages: parseInt(opts.maxPages as string, 10),
-      browser: opts.browser as string,
-      headless: opts.headless as boolean,
-      timeout: parseInt(opts.timeout as string, 10),
-      sameOrigin: opts.sameOrigin as boolean,
-      runAfter: opts.runAfter as string[] | undefined,
-    });
-  });
-
-// vulcn run
-program
-  .command("run")
-  .description("Run a recorded session with payloads")
-  .argument("<session>", "Session file or .vulcn/ directory to run")
-  .option("-p, --payload <names...>", "Payloads to use (see list below)")
-  .option(
-    "-f, --payload-file <file>",
-    "Load custom payloads from YAML/JSON file",
-  )
-  .option("-b, --browser <browser>", "Browser to use", "chromium")
-  .option("--headless", "Run in headless mode", true)
-  .option("--no-headless", "Run with visible browser")
-  .option(
-    "-r, --report <format>",
-    "Generate report (html, json, yaml, sarif, all)",
-  )
-  .option("--report-output <dir>", "Output directory for reports", ".")
-  .option(
-    "--passive",
-    "Run passive security scanner (headers, cookies, info-disclosure)",
-    true,
-  )
-  .option("--no-passive", "Disable passive security scanner")
-  .option("--creds <file>", "Credentials file for authenticated scans")
-  .addHelpText(
-    "after",
-    `
-${chalk.cyan.bold("Payload Types:")} ${chalk.gray("(fetched from PayloadsAllTheThings)")}
-  ${chalk.red("xss")}                ${chalk.gray("Cross-Site Scripting — script injection, event handlers")}
-  ${chalk.magenta("sqli")}               ${chalk.gray("SQL Injection — auth bypass, UNION, error-based")}
-  ${chalk.cyan("xxe")}                ${chalk.gray("XML External Entity — file read, SSRF via XML")}
-  ${chalk.yellow("cmd")}                ${chalk.gray("OS Command Injection — shell execution")}
-  ${chalk.white("redirect")}           ${chalk.gray("Open Redirect — URL redirect to attacker domain")}
-  ${chalk.green("traversal")}          ${chalk.gray("Path Traversal — directory traversal, exotic encoding")}
-
-${chalk.cyan.bold("Report Formats:")}
-  html               ${chalk.gray("Interactive HTML report (opens in browser)")}
-  json               ${chalk.gray("Machine-readable JSON output")}
-  yaml               ${chalk.gray("Human-readable YAML output")}
-  sarif              ${chalk.gray("SARIF v2.1.0 for GitHub Code Scanning / CI")}
-  all                ${chalk.gray("Generate all formats")}
-
-${chalk.cyan.bold("Examples:")}
-  ${chalk.gray("$")} vulcn run session.vulcn.yml                    ${chalk.gray("Default: xss payloads")}
-  ${chalk.gray("$")} vulcn run session.vulcn.yml -p xss sqli        ${chalk.gray("XSS + SQL injection")}
-  ${chalk.gray("$")} vulcn run session.vulcn.yml -p xss sqli cmd    ${chalk.gray("Multiple types")}
-  ${chalk.gray("$")} vulcn run session.vulcn.yml -p xss -r html     ${chalk.gray("With HTML report")}
-  ${chalk.gray("$")} vulcn run session.vulcn.yml -r sarif            ${chalk.gray("SARIF for CI/CD")}
-  ${chalk.gray("$")} vulcn run session.vulcn.yml --passive            ${chalk.gray("+ passive security scan")}
-  ${chalk.gray("$")} vulcn run session.vulcn.yml --no-headless       ${chalk.gray("Visible browser")}
-  ${chalk.gray("$")} vulcn run session.vulcn.yml -f custom.yml       ${chalk.gray("Custom payload file")}
-`,
-  )
-  .action(runCommand);
+  .action(storeCommand);
 
 // vulcn payloads
 program
@@ -231,18 +226,9 @@ program
   .addHelpText(
     "after",
     `
-${chalk.cyan.bold("Categories:")}
-  xss                ${chalk.gray("Cross-Site Scripting")}
-  sqli               ${chalk.gray("SQL Injection")}
-  ssrf               ${chalk.gray("Server-Side Request Forgery")}
-  xxe                ${chalk.gray("XML External Entity")}
-  command-injection  ${chalk.gray("OS Command Injection")}
-  path-traversal     ${chalk.gray("Directory Traversal")}
-  open-redirect      ${chalk.gray("Open Redirect")}
-
 ${chalk.cyan.bold("Examples:")}
-  ${chalk.gray("$")} vulcn payloads                   ${chalk.gray("List all payloads")}
-  ${chalk.gray("$")} vulcn payloads -c xss            ${chalk.gray("List XSS payloads only")}
+  ${chalk.gray("$")} vulcn payloads                   ${chalk.gray("List all")}
+  ${chalk.gray("$")} vulcn payloads -c xss            ${chalk.gray("XSS payloads only")}
   ${chalk.gray("$")} vulcn payloads -f custom.yml      ${chalk.gray("Include custom payloads")}
 `,
   )
@@ -257,17 +243,10 @@ program
   .addHelpText(
     "after",
     `
-${chalk.cyan.bold("Browsers:")}
-  chromium           ${chalk.gray("Chromium (default, recommended)")}
-  firefox            ${chalk.gray("Mozilla Firefox")}
-  webkit             ${chalk.gray("Apple Safari / WebKit")}
-
 ${chalk.cyan.bold("Examples:")}
-  ${chalk.gray("$")} vulcn install                    ${chalk.gray("Install Chromium only")}
-  ${chalk.gray("$")} vulcn install firefox webkit     ${chalk.gray("Install specific browsers")}
-  ${chalk.gray("$")} vulcn install --all              ${chalk.gray("Install all browsers")}
-
-${chalk.cyan.bold("Note:")} Most users only need Chromium. Use ${chalk.white("vulcn doctor")} to check status.
+  ${chalk.gray("$")} vulcn install                    ${chalk.gray("Install Chromium")}
+  ${chalk.gray("$")} vulcn install firefox webkit     ${chalk.gray("Specific browsers")}
+  ${chalk.gray("$")} vulcn install --all              ${chalk.gray("All browsers")}
 `,
   )
   .action(installCommand);
@@ -277,78 +256,5 @@ program
   .command("doctor")
   .description("Check available browsers and system status")
   .action(doctorCommand);
-
-// vulcn init
-program
-  .command("init")
-  .description("Create vulcn.config.yml with default configuration")
-  .option("-f, --force", "Overwrite existing config file")
-  .addHelpText(
-    "after",
-    `
-${chalk.cyan.bold("Generated Config:")}
-  Creates ${chalk.white("vulcn.config.yml")} with:
-  - Default plugins (payloads, XSS detection)
-  - Browser settings (chromium, headless)
-
-${chalk.cyan.bold("Examples:")}
-  ${chalk.gray("$")} vulcn init                       ${chalk.gray("Create config")}
-  ${chalk.gray("$")} vulcn init --force               ${chalk.gray("Overwrite existing config")}
-`,
-  )
-  .action(initCommand);
-
-// vulcn plugin (subcommands)
-const pluginCmd = program
-  .command("plugin")
-  .description("Manage plugins")
-  .addHelpText(
-    "after",
-    `
-${chalk.cyan.bold("Available Plugins:")}
-  @vulcn/plugin-payloads          ${chalk.gray("Payload loading (built-in, PayloadBox, custom)")}
-  @vulcn/plugin-detect-xss        ${chalk.gray("XSS detection via dialog/console monitoring")}
-  @vulcn/plugin-detect-sqli       ${chalk.gray("SQL injection detection (error, timing, diff)")}
-  @vulcn/plugin-detect-reflection ${chalk.gray("Reflection detection in responses")}
-  @vulcn/plugin-report            ${chalk.gray("Report generation (HTML, JSON, YAML)")}
-
-${chalk.cyan.bold("Examples:")}
-  ${chalk.gray("$")} vulcn plugin list
-  ${chalk.gray("$")} vulcn plugin add @vulcn/plugin-detect-xss
-  ${chalk.gray("$")} vulcn plugin add @vulcn/plugin-report -c '{"format":"html"}'
-  ${chalk.gray("$")} vulcn plugin disable @vulcn/plugin-detect-xss
-  ${chalk.gray("$")} vulcn plugin remove @vulcn/plugin-report
-`,
-  );
-
-pluginCmd
-  .command("list")
-  .description("List configured plugins")
-  .action(pluginListCommand);
-
-pluginCmd
-  .command("add")
-  .description("Add a plugin to configuration")
-  .argument("<name>", "Plugin name (e.g., @vulcn/plugin-detect-sqli)")
-  .option("-c, --config <json>", "Plugin configuration as JSON")
-  .action(pluginAddCommand);
-
-pluginCmd
-  .command("remove")
-  .description("Remove a plugin from configuration")
-  .argument("<name>", "Plugin name to remove")
-  .action(pluginRemoveCommand);
-
-pluginCmd
-  .command("enable")
-  .description("Enable a disabled plugin")
-  .argument("<name>", "Plugin name to enable")
-  .action(pluginEnableCommand);
-
-pluginCmd
-  .command("disable")
-  .description("Disable a plugin without removing it")
-  .argument("<name>", "Plugin name to disable")
-  .action(pluginDisableCommand);
 
 program.parse();

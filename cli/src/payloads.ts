@@ -94,7 +94,7 @@ export async function payloadsCommand(options: PayloadsOptions) {
   );
   console.log();
   console.log(chalk.gray("Usage:"));
-  console.log(chalk.white("  vulcn run session.yml -p xss sqli"));
-  console.log(chalk.white("  vulcn run session.yml -p xss sqli cmd xxe"));
-  console.log(chalk.white("  vulcn run session.yml -f custom-payloads.yml"));
+  console.log(chalk.white("  vulcn run -p xss sqli"));
+  console.log(chalk.white("  vulcn run -p xss sqli cmd xxe"));
+  console.log(chalk.white("  vulcn run --payload-file custom-payloads.yml"));
 }

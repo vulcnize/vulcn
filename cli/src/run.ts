@@ -1,126 +1,170 @@
-import { readFile } from "node:fs/promises";
+/**
+ * vulcn run — Execute security scans
+ *
+ * Reads `.vulcn.yml`, loads sessions from `sessions/`, runs payloads.
+ * CLI flags override config values for this run only.
+ *
+ * Usage:
+ *   vulcn run                          # reads everything from .vulcn.yml
+ *   vulcn run -p xss sqli             # override payload types
+ *   vulcn run --no-headless           # override headless mode
+ */
+
+import { readFile, readdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { DriverManager, PluginManager } from "@vulcn/engine";
 import {
-  loadSessionDir,
-  isSessionDir,
-  looksLikeSessionDir,
-  readAuthState,
+  loadProject,
+  ensureProjectDirs,
   decryptStorageState,
   getPassphrase,
 } from "@vulcn/engine";
-import type { Session } from "@vulcn/engine";
+import type { Session, VulcnProjectConfig } from "@vulcn/engine";
 import browserDriver from "@vulcn/driver-browser";
 import chalk from "chalk";
 import ora from "ora";
-import { performAuth } from "./auth-helper";
+import YAML from "yaml";
 
 interface RunOptions {
   payload?: string[];
   payloadFile?: string;
-  browser: string;
-  headless: boolean;
-  config?: string;
+  browser?: string;
+  headless?: boolean;
   report?: string;
   reportOutput?: string;
   passive?: boolean;
-  creds?: string;
+  payloadbox?: boolean;
+  config?: string;
 }
 
-export async function runCommand(sessionInput: string, options: RunOptions) {
-  // Create plugin manager for this run
-  const manager = new PluginManager();
+export async function runCommand(options: RunOptions) {
+  // ── Load project config ──────────────────────────────────────────────
 
-  // Load config from file if present
-  await manager.loadConfig(options.config);
+  const loadSpinner = ora("Loading project...").start();
 
-  // Load plugins from config
-  await manager.loadPlugins();
-
-  // Set up driver manager with browser driver
-  const drivers = new DriverManager();
-  drivers.register(browserDriver);
-
-  // Load session(s) — v2 directory or legacy file
-  const loadSpinner = ora("Loading session...").start();
-
-  let sessions: Session[] = [];
-  let storageState: string | undefined;
-
+  let project;
   try {
-    if (isSessionDir(sessionInput) || looksLikeSessionDir(sessionInput)) {
-      // v2 format: .vulcn/ directory
-      const loaded = await loadSessionDir(sessionInput);
-      sessions = loaded.sessions;
-
-      // Load encrypted auth state if available
-      const encState = await readAuthState(sessionInput);
-      if (encState) {
-        try {
-          const passphrase = getPassphrase();
-          storageState = decryptStorageState(encState, passphrase);
-        } catch {
-          loadSpinner.warn(
-            "Auth state found but VULCN_KEY not set — scanning without auth",
-          );
-        }
-      }
-
-      loadSpinner.succeed(
-        `Loaded ${chalk.cyan(sessions.length)} session(s) from ${chalk.cyan(sessionInput)}` +
-          (storageState ? chalk.green(" (authenticated)") : ""),
-      );
-    } else {
-      // Legacy: single .vulcn.yml file
-      const sessionYaml = await readFile(sessionInput, "utf-8");
-      const session = drivers.parseSession(sessionYaml, "browser");
-      sessions = [session];
-      loadSpinner.succeed(`Loaded session: ${chalk.cyan(session.name)}`);
-    }
+    project = await loadProject();
   } catch (err) {
-    loadSpinner.fail(`Cannot load session: ${sessionInput}`);
-    console.error(chalk.red(String(err)));
+    loadSpinner.fail(String(err));
     process.exit(1);
   }
 
-  if (sessions.length === 0) {
-    console.error(chalk.yellow("No injectable sessions found."));
-    process.exit(0);
-  }
+  const { config, paths } = project;
 
-  // Handle --creds for authentication (works for both v2 and legacy sessions)
-  let extraHeaders: Record<string, string> | undefined;
+  // ── Apply CLI overrides ──────────────────────────────────────────────
 
-  if (!storageState && options.creds) {
-    // Determine target URL from the first session's navigate step
-    const firstNav = sessions[0].steps.find(
-      (s) => s.type === "browser.navigate",
+  // CLI flags surgically override config values
+  const effectiveConfig: VulcnProjectConfig = {
+    ...config,
+    scan: {
+      ...config.scan,
+      ...(options.browser
+        ? { browser: options.browser as "chromium" | "firefox" | "webkit" }
+        : {}),
+      ...(options.headless !== undefined ? { headless: options.headless } : {}),
+    },
+    payloads: {
+      ...config.payloads,
+      ...(options.payload
+        ? { types: options.payload as VulcnProjectConfig["payloads"]["types"] }
+        : {}),
+      ...(options.payloadbox !== undefined
+        ? { payloadbox: options.payloadbox }
+        : {}),
+      ...(options.payloadFile ? { custom: options.payloadFile } : {}),
+    },
+    detection: {
+      ...config.detection,
+      ...(options.passive !== undefined ? { passive: options.passive } : {}),
+    },
+    report: {
+      ...config.report,
+      ...(options.report
+        ? { format: options.report as VulcnProjectConfig["report"]["format"] }
+        : {}),
+    },
+  };
+
+  // ── Load sessions from sessions/ directory ───────────────────────────
+
+  let sessions: Session[] = [];
+  const drivers = new DriverManager();
+  drivers.register(browserDriver);
+
+  if (!existsSync(paths.sessions)) {
+    loadSpinner.fail(
+      `No sessions/ directory found. Run ${chalk.white("vulcn crawl")} or ${chalk.white("vulcn record")} first.`,
     );
-    const targetUrl = (firstNav as { url?: string })?.url ?? "http://localhost";
+    process.exit(1);
+  }
 
-    const auth = await performAuth({
-      credsFile: options.creds,
-      browser: options.browser,
-      headless: options.headless,
-      targetUrl,
-    });
+  try {
+    const files = await readdir(paths.sessions);
+    const ymlFiles = files.filter(
+      (f) => f.endsWith(".yml") || f.endsWith(".yaml"),
+    );
 
-    if (auth.storageState) {
-      storageState = auth.storageState;
+    if (ymlFiles.length === 0) {
+      loadSpinner.fail(
+        `No session files in sessions/. Run ${chalk.white("vulcn crawl")} or ${chalk.white("vulcn record")} first.`,
+      );
+      process.exit(1);
     }
-    if (auth.extraHeaders) {
-      extraHeaders = auth.extraHeaders;
+
+    for (const file of ymlFiles) {
+      const content = await readFile(join(paths.sessions, file), "utf-8");
+      const session = drivers.parseSession(content, "browser");
+      sessions.push(session);
+    }
+
+    loadSpinner.succeed(
+      `Loaded ${chalk.cyan(sessions.length)} session(s) from ${chalk.cyan("sessions/")}`,
+    );
+  } catch (err) {
+    loadSpinner.fail(`Failed to load sessions: ${err}`);
+    process.exit(1);
+  }
+
+  // ── Load auth state ──────────────────────────────────────────────────
+
+  let storageState: string | undefined;
+  const authStatePath = join(paths.auth, "state.enc");
+
+  if (existsSync(authStatePath)) {
+    try {
+      const passphrase = getPassphrase();
+      const encrypted = await readFile(authStatePath, "utf-8");
+      storageState = decryptStorageState(encrypted, passphrase);
+      console.log(chalk.green("   🔑 Auth state loaded"));
+    } catch {
+      console.log(
+        chalk.yellow(
+          "   ⚠️  Auth state found but VULCN_KEY not set — scanning without auth",
+        ),
+      );
     }
   }
 
-  // Load default payloads and detection plugins via core engine
+  // ── Load payloads & detection plugins via engine ─────────────────────
+
+  const manager = new PluginManager();
   const defaultsSpinner = ora(
     "Loading payloads & detection plugins...",
   ).start();
+
   try {
-    await manager.loadDefaults(options.payload ?? [], {
-      passive: options.passive !== false,
-      payloadFile: options.payloadFile,
-    });
+    // Resolve relative custom payload path against project root
+    if (effectiveConfig.payloads.custom) {
+      effectiveConfig.payloads.custom = resolve(
+        paths.root,
+        effectiveConfig.payloads.custom,
+      );
+    }
+
+    await manager.loadFromConfig(effectiveConfig);
+
     const payloadNames = manager
       .getPayloads()
       .map((p) => p.name)
@@ -133,23 +177,23 @@ export async function runCommand(sessionInput: string, options: RunOptions) {
     process.exit(1);
   }
 
-  // Load report plugin if --report is specified (CLI-specific concern)
-  if (options.report) {
+  // ── Load report plugin ───────────────────────────────────────────────
+
+  const reportFormat = effectiveConfig.report.format;
+  if (reportFormat) {
     const reportSpinner = ora("Loading report plugin...").start();
     try {
       const reportPlugin = await import("@vulcn/plugin-report");
-
-      // Determine output path from --report-output or default
-      const outputDir = options.reportOutput || ".";
+      await ensureProjectDirs(paths, ["reports"]);
 
       manager.addPlugin(reportPlugin.default, {
-        format: options.report,
-        outputDir,
+        format: reportFormat,
+        outputDir: options.reportOutput || paths.reports,
         filename: "vulcn-report",
-        open: options.report === "html" || options.report === "all",
+        open: reportFormat === "html" || reportFormat === "all",
       });
       reportSpinner.succeed(
-        `Report plugin loaded (format: ${chalk.cyan(options.report)})`,
+        `Report plugin loaded (format: ${chalk.cyan(reportFormat)})`,
       );
     } catch (err) {
       reportSpinner.fail(`Failed to load report plugin: ${err}`);
@@ -157,10 +201,15 @@ export async function runCommand(sessionInput: string, options: RunOptions) {
     }
   }
 
+  // ── Execute scan ─────────────────────────────────────────────────────
+
   const payloads = manager.getPayloads();
 
   console.log();
   console.log(chalk.cyan("🔍 Running security tests"));
+  console.log(
+    chalk.gray(`   Target: ${effectiveConfig.target ?? "from sessions"}`),
+  );
   console.log(
     chalk.gray(
       `   Sessions: ${sessions.length} (${sessions.map((s) => s.name).join(", ")})`,
@@ -174,10 +223,10 @@ export async function runCommand(sessionInput: string, options: RunOptions) {
       `   Payload count: ${payloads.reduce((sum, p) => sum + p.payloads.length, 0)}`,
     ),
   );
-  console.log(chalk.gray(`   Browser: ${options.browser}`));
-  console.log(chalk.gray(`   Headless: ${options.headless}`));
+  console.log(chalk.gray(`   Browser: ${effectiveConfig.scan.browser}`));
+  console.log(chalk.gray(`   Headless: ${effectiveConfig.scan.headless}`));
   if (storageState) {
-    console.log(chalk.green(`   Auth: authenticated (storage state loaded)`));
+    console.log(chalk.green(`   Auth: authenticated`));
   }
   console.log();
 
@@ -199,20 +248,15 @@ export async function runCommand(sessionInput: string, options: RunOptions) {
       runSpinner.start("Continuing tests...");
     };
 
-    let result;
-
-    // Always use executeScan — works for 1 or many sessions,
-    // ensures onSessionStart always fires for consistent UX
     const scanResult = await drivers.executeScan(sessions, manager, {
-      headless: options.headless,
+      headless: effectiveConfig.scan.headless,
       ...(storageState ? { storageState } : {}),
-      ...(extraHeaders ? { extraHeaders } : {}),
       onFinding,
       onSessionStart: (session: Session, index: number, total: number) => {
         runSpinner.text = `Session ${index + 1}/${total} — ${session.name}`;
       },
     });
-    result = scanResult.aggregate;
+    const result = scanResult.aggregate;
 
     runSpinner.succeed("Tests completed");
     console.log();
@@ -263,7 +307,6 @@ export async function runCommand(sessionInput: string, options: RunOptions) {
       }
     }
 
-    // Print error handler summary if there were issues
     const errorHandler = manager.getErrorHandler();
     if (errorHandler.hasErrors()) {
       console.log();
@@ -273,7 +316,6 @@ export async function runCommand(sessionInput: string, options: RunOptions) {
     runSpinner.fail("Test execution failed");
     console.error(chalk.red(String(err)));
 
-    // Print error handler summary for context
     const errorHandler = manager.getErrorHandler();
     if (errorHandler.hasErrors()) {
       console.log();

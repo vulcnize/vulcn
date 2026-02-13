@@ -190,7 +190,7 @@ export interface EngineInfo {
  * Base context available to all plugin hooks
  */
 export interface PluginContext {
-  /** Plugin-specific config from vulcn.config.yml */
+  /** Plugin-specific configuration */
   config: Record<string, unknown>;
 
   /** Engine information */
@@ -275,37 +275,6 @@ export interface DetectContext extends RunContext {
 
   /** Step ID for reporting */
   stepId: string;
-}
-
-/**
- * Plugin configuration in vulcn.config.yml
- */
-export interface PluginConfig {
-  /** Plugin name/path */
-  name: string;
-
-  /** Plugin-specific configuration */
-  config?: Record<string, unknown>;
-
-  /** Whether plugin is enabled (default: true) */
-  enabled?: boolean;
-}
-
-/**
- * Vulcn configuration file schema
- */
-export interface VulcnConfig {
-  /** Config version */
-  version: string;
-
-  /** Plugins to load */
-  plugins?: PluginConfig[];
-
-  /** Global settings */
-  settings?: {
-    headless?: boolean;
-    timeout?: number;
-  };
 }
 
 /**

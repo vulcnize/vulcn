@@ -16,7 +16,6 @@ import type {
   LoadedDriver,
   DriverSource,
   Session,
-  Step,
   RunContext,
   RunResult,
   RunOptions,
@@ -139,53 +138,20 @@ export class DriverManager {
   /**
    * Parse a YAML session string into a Session object.
    *
-   * Handles both new driver-format sessions and legacy v1 sessions.
-   * Legacy sessions (those with non-namespaced step types like "click",
-   * "input", "navigate") are automatically converted to the driver format
-   * (e.g., "browser.click", "browser.input", "browser.navigate").
+   * Sessions must use the driver format with a `driver` field.
    *
    * @param yaml - Raw YAML string
-   * @param defaultDriver - Driver to assign for legacy sessions (default: "browser")
    */
-  parseSession(yaml: string, defaultDriver = "browser"): Session {
+  parseSession(yaml: string): Session {
     const data = parse(yaml) as Record<string, unknown>;
 
-    // Already in driver format — has a `driver` field
-    if (data.driver && typeof data.driver === "string") {
-      return data as unknown as Session;
+    if (!data.driver || typeof data.driver !== "string") {
+      throw new Error(
+        "Invalid session format: missing 'driver' field. Sessions must use the driver format.",
+      );
     }
 
-    // Legacy format — convert to driver session
-    const steps = (data.steps as Array<Record<string, unknown>>) ?? [];
-    const convertedSteps: Step[] = steps.map((step) => {
-      const type = step.type as string;
-
-      // If step type is already namespaced (e.g. "browser.click"), keep it
-      if (type.includes(".")) {
-        return step as unknown as Step;
-      }
-
-      // Convert legacy type → namespaced type
-      return {
-        ...step,
-        type: `${defaultDriver}.${type}`,
-      } as unknown as Step;
-    });
-
-    return {
-      name: (data.name as string) ?? "Untitled Session",
-      driver: defaultDriver,
-      driverConfig: {
-        browser: data.browser ?? "chromium",
-        viewport: data.viewport ?? { width: 1280, height: 720 },
-        startUrl: data.startUrl as string,
-      },
-      steps: convertedSteps,
-      metadata: {
-        recordedAt: data.recordedAt as string,
-        version: (data.version as string) ?? "1",
-      },
-    };
+    return data as unknown as Session;
   }
 
   /**

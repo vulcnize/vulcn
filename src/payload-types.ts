@@ -22,7 +22,7 @@ export type PayloadCategory =
 /**
  * Payload source types
  */
-export type PayloadSource = "custom" | "payloadbox" | "plugin";
+export type PayloadSource = "curated" | "custom" | "payloadbox" | "plugin";
 
 /**
  * Runtime payload structure - used by plugins and the runner

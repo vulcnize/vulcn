@@ -2,6 +2,7 @@
  * vulcn store — Credential management
  *
  * Securely stores authentication credentials for scanning.
+ * Saves to `auth/state.enc` next to `.vulcn.yml`.
  *
  * Usage:
  *   vulcn store <username> <password>              # Store form credentials
@@ -11,12 +12,16 @@
  * from --passphrase flag, interactive prompt, or VULCN_KEY env var.
  */
 
-import { writeFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import chalk from "chalk";
-import { encryptCredentials, getPassphrase } from "@vulcn/engine";
+import {
+  encryptCredentials,
+  getPassphrase,
+  loadProject,
+  ensureProjectDirs,
+} from "@vulcn/engine";
 import type {
   FormCredentials,
   HeaderCredentials,
@@ -25,7 +30,6 @@ import type {
 
 interface StoreOptions {
   header?: string;
-  output?: string;
   passphrase?: string;
   loginUrl?: string;
   userSelector?: string;
@@ -42,7 +46,6 @@ async function promptPassphrase(prompt: string): Promise<string> {
   });
 
   return new Promise((resolve) => {
-    // Disable echo for password input
     if (process.stdin.isTTY) {
       process.stdout.write(prompt);
       const stdin = process.stdin;
@@ -60,13 +63,11 @@ async function promptPassphrase(prompt: string): Promise<string> {
           process.stdout.write("\n");
           resolve(password);
         } else if (c === "\u007f" || c === "\b") {
-          // Backspace
           if (password.length > 0) {
             password = password.slice(0, -1);
             process.stdout.write("\b \b");
           }
         } else if (c === "\u0003") {
-          // Ctrl+C
           process.exit(1);
         } else {
           password += c;
@@ -75,7 +76,6 @@ async function promptPassphrase(prompt: string): Promise<string> {
       };
       stdin.on("data", onData);
     } else {
-      // Non-interactive: read from pipe
       rl.question(prompt, (answer) => {
         rl.close();
         resolve(answer);
@@ -89,12 +89,23 @@ export async function storeCommand(
   password: string | undefined,
   options: StoreOptions,
 ) {
-  const outputPath = resolve(options.output ?? ".vulcn/auth.enc");
+  // ── Load project ─────────────────────────────────────────────────────
+
+  let project;
+  try {
+    project = await loadProject();
+  } catch (err) {
+    console.error(chalk.red(String(err)));
+    process.exit(1);
+  }
+
+  const { config, paths } = project;
+
+  // ── Parse credentials ────────────────────────────────────────────────
 
   let credentials: Credentials;
 
   if (options.header) {
-    // Header-based auth: --header "Authorization: Bearer xyz"
     const colonIdx = options.header.indexOf(":");
     if (colonIdx === -1) {
       console.error(
@@ -113,7 +124,6 @@ export async function storeCommand(
 
     console.log(chalk.gray(`   Auth type: header (${headerName})`));
   } else {
-    // Form-based auth
     if (!username || !password) {
       console.error(
         chalk.red(
@@ -124,13 +134,29 @@ export async function storeCommand(
       process.exit(1);
     }
 
+    // Use auth config from .vulcn.yml if available
+    const authConfig =
+      config.auth && config.auth.strategy === "form" ? config.auth : null;
+
     credentials = {
       type: "form",
       username,
       password,
-      ...(options.loginUrl ? { loginUrl: options.loginUrl } : {}),
-      ...(options.userSelector ? { userSelector: options.userSelector } : {}),
-      ...(options.passSelector ? { passSelector: options.passSelector } : {}),
+      ...(options.loginUrl || authConfig?.loginUrl
+        ? { loginUrl: options.loginUrl ?? authConfig?.loginUrl }
+        : {}),
+      ...(options.userSelector || authConfig?.userSelector
+        ? {
+            userSelector:
+              options.userSelector ?? authConfig?.userSelector ?? undefined,
+          }
+        : {}),
+      ...(options.passSelector || authConfig?.passSelector
+        ? {
+            passSelector:
+              options.passSelector ?? authConfig?.passSelector ?? undefined,
+          }
+        : {}),
     } satisfies FormCredentials;
 
     console.log(chalk.gray(`   Auth type: form`));
@@ -138,12 +164,12 @@ export async function storeCommand(
     console.log(chalk.gray(`   Password: ${"*".repeat(password.length)}`));
   }
 
-  // Get passphrase
+  // ── Get passphrase ───────────────────────────────────────────────────
+
   let passphrase: string;
   try {
     passphrase = getPassphrase(options.passphrase);
   } catch {
-    // No env var or flag — prompt interactively
     if (!process.stdin.isTTY) {
       console.error(
         chalk.red(
@@ -160,7 +186,6 @@ export async function storeCommand(
       process.exit(1);
     }
 
-    // Confirm
     const confirm = await promptPassphrase("   Confirm passphrase: ");
     if (passphrase !== confirm) {
       console.error(chalk.red("Passphrases do not match."));
@@ -168,18 +193,17 @@ export async function storeCommand(
     }
   }
 
-  // Encrypt
+  // ── Encrypt and save ─────────────────────────────────────────────────
+
   const encrypted = encryptCredentials(credentials, passphrase);
 
-  // Write to file
-  const dir = dirname(outputPath);
-  if (!existsSync(dir)) {
-    await mkdir(dir, { recursive: true });
-  }
-
+  await ensureProjectDirs(paths, ["auth"]);
+  const outputPath = join(paths.auth, "state.enc");
   await writeFile(outputPath, encrypted, "utf-8");
 
   console.log();
-  console.log(chalk.green(`✅ Credentials saved to ${chalk.cyan(outputPath)}`));
-  console.log(chalk.yellow(`⚠️  Add ${chalk.cyan(outputPath)} to .gitignore`));
+  console.log(
+    chalk.green(`✅ Credentials saved to ${chalk.cyan("auth/state.enc")}`),
+  );
+  console.log(chalk.yellow(`⚠️  Add ${chalk.cyan("auth/")} to .gitignore`));
 }

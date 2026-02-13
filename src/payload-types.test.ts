@@ -27,8 +27,13 @@ describe("Payload Types", () => {
   });
 
   it("should define valid PayloadSource values", () => {
-    const sources: PayloadSource[] = ["custom", "payloadbox", "plugin"];
-    expect(sources).toHaveLength(3);
+    const sources: PayloadSource[] = [
+      "curated",
+      "custom",
+      "payloadbox",
+      "plugin",
+    ];
+    expect(sources).toHaveLength(4);
   });
 
   it("should allow creating RuntimePayload objects", () => {

@@ -3,8 +3,9 @@
  * Official payload loader plugin for Vulcn
  *
  * Payload sources (in order of priority):
- * 1. PayloadBox — community-curated payloads from PayloadsAllTheThings (default)
- * 2. Custom files — expert-provided YAML/JSON payload files
+ * 1. Curated — hand-crafted, context-aware payloads (DEFAULT)
+ * 2. PayloadBox — community payloads from PayloadsAllTheThings (opt-in)
+ * 3. Custom files — expert-provided YAML/JSON payload files
  *
  * Short aliases for payload types:
  *   xss, sqli, xxe, cmd, redirect, traversal
@@ -13,6 +14,7 @@
 import { z } from "zod";
 import type { VulcnPlugin, PluginContext, RuntimePayload } from "@vulcn/engine";
 import { loadPayloadBox, resolvePayloadType } from "./loaders/payloadbox";
+import { getCuratedPayloads, hasCuratedPayloads } from "./loaders/curated";
 import { loadFromFiles } from "./loaders/file";
 
 /**
@@ -20,16 +22,23 @@ import { loadFromFiles } from "./loaders/file";
  */
 const configSchema = z.object({
   /**
-   * Payload types to load from PayloadsAllTheThings.
+   * Payload types to load.
    * Accepts short aliases: xss, sqli, xxe, cmd, redirect, traversal
    * @example ["xss", "sqli"]
    */
   types: z.array(z.string()).optional(),
 
   /**
-   * Maximum payloads per type (default 50)
+   * Enable PayloadBox (PayloadsAllTheThings) payloads.
+   * When true, loads community payloads IN ADDITION to curated payloads.
+   * @default false
    */
-  limit: z.number().default(50),
+  usePayloadBox: z.boolean().default(false),
+
+  /**
+   * Maximum payloads per type when loading from PayloadBox (default 100)
+   */
+  limit: z.number().default(100),
 
   /**
    * Custom payload files to load (YAML/JSON)
@@ -44,9 +53,10 @@ export type PayloadsPluginConfig = z.infer<typeof configSchema>;
  */
 const plugin: VulcnPlugin = {
   name: "@vulcn/plugin-payloads",
-  version: "0.3.0",
+  version: "0.4.0",
   apiVersion: 1,
-  description: "Payload loader — PayloadsAllTheThings + custom files",
+  description:
+    "Payload loader — curated context-aware payloads + PayloadBox + custom files",
 
   configSchema,
 
@@ -55,24 +65,63 @@ const plugin: VulcnPlugin = {
       const config = configSchema.parse(ctx.config);
       const loadedPayloads: RuntimePayload[] = [];
 
-      // 1. Load from PayloadBox (primary source)
       if (config.types?.length) {
         for (const type of config.types) {
-          try {
-            const payload = await loadPayloadBox(type, config.limit, ctx.fetch);
-            loadedPayloads.push(payload);
-            ctx.logger.debug(`Loaded payload type: ${type}`);
-          } catch (err) {
-            // Payload loading failure is critical — if we can't load
-            // what was requested, the scan has no ammunition.
-            throw new Error(
-              `Failed to load payload type "${type}": ${err instanceof Error ? err.message : String(err)}`,
+          // 1. Load curated payloads first (always, if available)
+          const curated = getCuratedPayloads(type);
+          if (curated) {
+            loadedPayloads.push(...curated);
+            ctx.logger.debug(
+              `Loaded ${curated.length} curated payload sets for: ${type}`,
             );
+          }
+
+          // 2. Load from PayloadBox if enabled (supplements curated)
+          if (config.usePayloadBox) {
+            try {
+              const payload = await loadPayloadBox(
+                type,
+                config.limit,
+                ctx.fetch,
+              );
+              loadedPayloads.push(payload);
+              ctx.logger.debug(
+                `Loaded PayloadBox payload type: ${type} (${payload.payloads.length} payloads)`,
+              );
+            } catch (err) {
+              // If no curated payloads either, this is critical
+              if (!curated) {
+                throw new Error(
+                  `Failed to load payload type "${type}": ${err instanceof Error ? err.message : String(err)}`,
+                );
+              }
+              // Curated payloads available — PayloadBox failure is a warning
+              ctx.logger.warn(
+                `PayloadBox fetch failed for "${type}" (using curated payloads): ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+          } else if (!curated) {
+            // No curated, no PayloadBox — try PayloadBox as fallback
+            try {
+              const payload = await loadPayloadBox(
+                type,
+                config.limit,
+                ctx.fetch,
+              );
+              loadedPayloads.push(payload);
+              ctx.logger.debug(
+                `No curated payloads for "${type}" — loaded from PayloadBox (${payload.payloads.length} payloads)`,
+              );
+            } catch (err) {
+              throw new Error(
+                `No payloads available for "${type}": no curated set exists and PayloadBox fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
           }
         }
       }
 
-      // 2. Load from custom files
+      // 3. Load from custom files
       if (config.files?.length) {
         try {
           const filePayloads = await loadFromFiles(config.files);
@@ -90,8 +139,12 @@ const plugin: VulcnPlugin = {
       // Add to shared context
       ctx.payloads.push(...loadedPayloads);
 
+      const totalPayloads = loadedPayloads.reduce(
+        (sum, p) => sum + p.payloads.length,
+        0,
+      );
       ctx.logger.info(
-        `Payloads plugin loaded ${loadedPayloads.length} payload sets`,
+        `Payloads plugin loaded ${loadedPayloads.length} payload sets (${totalPayloads} total payloads)`,
       );
     },
   },
@@ -110,3 +163,8 @@ export {
   clearPayloadBoxCache,
 } from "./loaders/payloadbox";
 export { loadFromFiles, loadFromFile } from "./loaders/file";
+export {
+  getCuratedPayloads,
+  hasCuratedPayloads,
+  getCuratedTypes,
+} from "./loaders/curated";

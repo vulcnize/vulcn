@@ -1,14 +1,14 @@
 /**
  * @vulcn/engine - Core security testing engine
  *
- * v0.7.0: Driver-based architecture + Auth + Session v2
+ * v0.9.0: Unified project config (.vulcn.yml)
  *
- * The engine now provides:
+ * The engine provides:
+ * - Project config system (.vulcn.yml — single source of truth)
  * - Driver system for different recording targets (browser, api, cli)
  * - Plugin system for payloads and detection
  * - Generic session format
  * - Credential encryption & auth state management
- * - Session format v2 (.vulcn/ directory)
  *
  * Drivers handle:
  * - Recording interactions (RecorderDriver)
@@ -19,6 +19,28 @@
  * - Vulnerability detection (reflection, execution, etc.)
  * - Reporting (JSON, SARIF, HTML)
  */
+
+// ============================================================================
+// Project Config (.vulcn.yml)
+// ============================================================================
+
+export {
+  VulcnProjectConfigSchema,
+  parseProjectConfig,
+  DEFAULT_PROJECT_CONFIG,
+} from "./config";
+export type { VulcnProjectConfig } from "./config";
+
+export {
+  findProjectRoot,
+  resolveProjectPaths,
+  loadProject,
+  loadProjectFromFile,
+  ensureProjectDirs,
+  CONFIG_FILENAME,
+  DIRS,
+} from "./project";
+export type { ProjectPaths, VulcnProject } from "./project";
 
 // ============================================================================
 // Driver System
@@ -51,8 +73,6 @@ export { PluginManager, pluginManager } from "./plugin-manager";
 export { PLUGIN_API_VERSION } from "./plugin-types";
 export type {
   VulcnPlugin,
-  VulcnConfig,
-  PluginConfig,
   PluginHooks,
   PluginContext,
   RecordContext,
@@ -86,18 +106,10 @@ export type {
 } from "./auth";
 
 // ============================================================================
-// Session Format v2
+// Session Types
 // ============================================================================
 
-export {
-  loadSessionDir,
-  saveSessionDir,
-  isSessionDir,
-  looksLikeSessionDir,
-  readAuthState,
-  readCapturedRequests,
-} from "./session";
-export type { ScanManifest, SessionRef, CapturedRequest } from "./session";
+export type { CapturedRequest } from "./session";
 
 // ============================================================================
 // Payload Types

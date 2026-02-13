@@ -99,10 +99,16 @@ export function checkReflection(
   // pre-existing page content or partially-encoded reflections.
   const payloadInContent = content.includes(payloadValue);
 
-  // Check for detect patterns — but ONLY if the payload appears verbatim.
-  // This prevents false positives from patterns matching encoded text
-  // like `onerror=alert(1)` inside a safely-quoted attribute value.
-  if (payloadInContent) {
+  // For payloads WITH dangerous chars that passed encoding checks above,
+  // pattern matching provides high confidence (the chars are unencoded,
+  // so the pattern likely triggers in an executable context).
+  //
+  // For payloads WITHOUT dangerous chars (e.g. `x onmouseover=alert(1)`),
+  // pattern matching is unreliable — the text appears verbatim even inside
+  // safely-quoted attributes where it can't execute. These payloads only
+  // work in unquoted attribute contexts. Actual XSS from them will be
+  // caught by the detect-xss plugin's onDialog hook when alert() fires.
+  if (payloadInContent && hasDangerousChars) {
     for (const pattern of payloadSet.detectPatterns) {
       if (pattern.test(content)) {
         return {
@@ -118,9 +124,11 @@ export function checkReflection(
         };
       }
     }
+  }
 
-    // Verbatim match only (no detect pattern matched) — lower confidence.
-    // Use type "reflection" since we can't confirm exploitation.
+  // Verbatim match only — lower confidence.
+  // Use type "reflection" since we can't confirm exploitation.
+  if (payloadInContent) {
     return {
       type: "reflection",
       severity: "low",

@@ -1,18 +1,15 @@
 /**
  * Vulcn Plugin Manager
- * Handles plugin loading, lifecycle, and hook execution
+ * Handles plugin loading, lifecycle, and hook execution.
+ *
+ * The primary entry point is `loadFromConfig(config)` which takes
+ * a flat `VulcnProjectConfig` (from `.vulcn.yml`) and maps it to
+ * internal plugin configs automatically.
  */
 
-import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { resolve, isAbsolute } from "node:path";
 import { createRequire } from "node:module";
-import YAML from "yaml";
-import { z } from "zod";
 import type {
   VulcnPlugin,
-  VulcnConfig,
-  PluginConfig,
   LoadedPlugin,
   PluginContext,
   PluginSource,
@@ -24,39 +21,16 @@ import { PLUGIN_API_VERSION } from "./plugin-types";
 import type { Finding } from "./types";
 import type { RuntimePayload } from "./payload-types";
 import { ErrorHandler, ErrorSeverity, VulcnError } from "./errors";
+import type { VulcnProjectConfig } from "./config";
 
 const _require = createRequire(import.meta.url);
 const { version: ENGINE_VERSION } = _require("../package.json");
-
-/**
- * Config file schema
- */
-const VulcnConfigSchema = z.object({
-  version: z.string().default("1"),
-  plugins: z
-    .array(
-      z.object({
-        name: z.string(),
-        config: z.record(z.unknown()).optional(),
-        enabled: z.boolean().default(true),
-      }),
-    )
-    .optional(),
-  settings: z
-    .object({
-      browser: z.enum(["chromium", "firefox", "webkit"]).optional(),
-      headless: z.boolean().optional(),
-      timeout: z.number().optional(),
-    })
-    .optional(),
-});
 
 /**
  * Plugin Manager - loads, configures, and orchestrates plugins
  */
 export class PluginManager {
   private plugins: LoadedPlugin[] = [];
-  private config: VulcnConfig | null = null;
   private initialized = false;
   private errorHandler: ErrorHandler;
 
@@ -73,116 +47,6 @@ export class PluginManager {
   /** Get the error handler for post-run inspection */
   getErrorHandler(): ErrorHandler {
     return this.errorHandler;
-  }
-
-  /**
-   * Load configuration from vulcn.config.yml
-   */
-  async loadConfig(configPath?: string): Promise<VulcnConfig> {
-    const paths = configPath
-      ? [configPath]
-      : [
-          "vulcn.config.yml",
-          "vulcn.config.yaml",
-          "vulcn.config.json",
-          ".vulcnrc.yml",
-          ".vulcnrc.yaml",
-          ".vulcnrc.json",
-        ];
-
-    for (const path of paths) {
-      const resolved = isAbsolute(path) ? path : resolve(process.cwd(), path);
-      if (existsSync(resolved)) {
-        const content = await readFile(resolved, "utf-8");
-        const parsed = path.endsWith(".json")
-          ? JSON.parse(content)
-          : YAML.parse(content);
-        this.config = VulcnConfigSchema.parse(parsed);
-        return this.config;
-      }
-    }
-
-    // No config file - use defaults
-    this.config = { version: "1", plugins: [], settings: {} };
-    return this.config;
-  }
-
-  /**
-   * Load all plugins from config
-   */
-  async loadPlugins(): Promise<void> {
-    if (!this.config) {
-      await this.loadConfig();
-    }
-
-    const pluginConfigs = this.config?.plugins || [];
-
-    for (const pluginConfig of pluginConfigs) {
-      if (pluginConfig.enabled === false) continue;
-
-      try {
-        const loaded = await this.loadPlugin(pluginConfig);
-        this.plugins.push(loaded);
-      } catch (err) {
-        // Plugin from config failing to load is an ERROR — scan can
-        // proceed but the user explicitly asked for this plugin.
-        this.errorHandler.catch(err, {
-          severity: ErrorSeverity.ERROR,
-          source: `plugin-manager:load`,
-          context: { plugin: pluginConfig.name },
-        });
-      }
-    }
-  }
-
-  /**
-   * Load a single plugin
-   */
-  private async loadPlugin(config: PluginConfig): Promise<LoadedPlugin> {
-    const { name, config: pluginConfig = {} } = config;
-    let plugin: VulcnPlugin;
-    let source: PluginSource;
-
-    // Determine plugin source and load
-    if (name.startsWith("./") || name.startsWith("../") || isAbsolute(name)) {
-      // Local file plugin
-      const resolved = isAbsolute(name) ? name : resolve(process.cwd(), name);
-      const module = await import(resolved);
-      plugin = module.default || module;
-      source = "local";
-    } else if (name.startsWith("@vulcn/")) {
-      // Official plugin (npm package)
-      const module = await import(name);
-      plugin = module.default || module;
-      source = "npm";
-    } else {
-      // Community plugin (npm package)
-      const module = await import(name);
-      plugin = module.default || module;
-      source = "npm";
-    }
-
-    // Validate plugin structure
-    this.validatePlugin(plugin);
-
-    // Validate plugin config if schema provided
-    let resolvedConfig = pluginConfig;
-    if (plugin.configSchema) {
-      try {
-        resolvedConfig = plugin.configSchema.parse(pluginConfig);
-      } catch (err) {
-        throw new Error(
-          `Invalid config for plugin ${name}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
-
-    return {
-      plugin,
-      config: resolvedConfig,
-      source,
-      enabled: true,
-    };
   }
 
   /**
@@ -258,53 +122,59 @@ export class PluginManager {
   }
 
   /**
-   * Load default payloads and detection plugins for common scanning.
+   * Load the engine from a flat VulcnProjectConfig (from `.vulcn.yml`).
    *
-   * This encapsulates the orchestration logic that was previously duplicated
-   * in the CLI `run` command and the Worker `scanner`. Both now collapse
-   * to a single call:
+   * This is the primary entry point for the new config system.
+   * Maps user-facing config keys to internal plugin configs automatically.
    *
-   *   await manager.loadDefaults(["xss", "sqli"], { passive: true });
-   *
-   * The method:
-   * 1. Loads requested payload types via @vulcn/plugin-payloads
-   * 2. Auto-loads matching detection plugins (xss → detect-xss, sqli → detect-sqli)
-   * 3. Optionally loads the passive security scanner
-   * 4. Falls back to ["xss"] if no payload types specified
+   * @param config - Parsed and validated VulcnProjectConfig
    */
-  async loadDefaults(
-    payloadTypes: string[] = [],
-    options: {
-      /** Load passive scanner plugin (default: true) */
-      passive?: boolean;
-      /** Custom payload file to load */
-      payloadFile?: string;
-    } = {},
-  ): Promise<void> {
-    const { passive = true, payloadFile } = options;
-    const types = payloadTypes.length > 0 ? payloadTypes : ["xss"];
+  async loadFromConfig(config: VulcnProjectConfig): Promise<void> {
+    const { payloads, detection } = config;
 
-    // Load custom payloads from file if provided
-    if (payloadFile) {
+    // ── Load payloads ──────────────────────────────────────────────────
+
+    // Custom payload file (resolve relative paths externally before passing in)
+    if (payloads.custom) {
       try {
         const payloadPkg = "@vulcn/plugin-payloads";
         const { loadFromFile } = await import(/* @vite-ignore */ payloadPkg);
-        const loaded = await loadFromFile(payloadFile);
+        const loaded = await loadFromFile(payloads.custom);
         this.addPayloads(loaded);
       } catch (err) {
         throw new Error(
-          `Failed to load custom payloads from ${payloadFile}: ${err instanceof Error ? err.message : String(err)}`,
+          `Failed to load custom payloads from ${payloads.custom}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
 
-    // Load payload types
+    // Load payload types — curated first, then PayloadBox if enabled
     try {
       const payloadPkg = "@vulcn/plugin-payloads";
-      const { loadPayloadBox } = await import(/* @vite-ignore */ payloadPkg);
-      for (const name of types) {
-        const payload = await loadPayloadBox(name);
-        this.addPayloads([payload]);
+      const { getCuratedPayloads, loadPayloadBox } = await import(
+        /* @vite-ignore */ payloadPkg
+      );
+
+      for (const name of payloads.types) {
+        // Curated payloads (always, if available)
+        const curated = getCuratedPayloads(name);
+        if (curated) {
+          this.addPayloads(curated);
+        }
+
+        // PayloadBox if enabled, or as fallback if no curated set
+        if (payloads.payloadbox || !curated) {
+          try {
+            const payload = await loadPayloadBox(name, payloads.limit);
+            this.addPayloads([payload]);
+          } catch (err) {
+            if (!curated) {
+              throw new Error(
+                `No payloads for "${name}": no curated set and PayloadBox failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+          }
+        }
       }
     } catch (err) {
       throw new Error(
@@ -312,37 +182,39 @@ export class PluginManager {
       );
     }
 
-    // Auto-load XSS detection plugin
+    // ── Auto-load detection plugins ────────────────────────────────────
+
+    // XSS detection: map flat config → plugin config
     if (
-      types.some((t) => t.toLowerCase() === "xss") &&
+      payloads.types.includes("xss") &&
       !this.hasPlugin("@vulcn/plugin-detect-xss")
     ) {
       try {
         const pkg = "@vulcn/plugin-detect-xss";
         const mod = await import(/* @vite-ignore */ pkg);
-        this.addPlugin(mod.default);
+        this.addPlugin(mod.default, {
+          detectDialogs: detection.xss.dialogs,
+          detectConsole: detection.xss.console,
+          consoleMarker: detection.xss.consoleMarker,
+          detectDomMutation: detection.xss.domMutation,
+          severity: detection.xss.severity,
+          alertPatterns: detection.xss.alertPatterns,
+        });
       } catch (err) {
         this.errorHandler.catch(err, {
           severity: ErrorSeverity.WARN,
-          source: "plugin-manager:auto-load",
+          source: "plugin-manager:loadFromConfig",
           context: { plugin: "@vulcn/plugin-detect-xss" },
         });
       }
     }
 
-    // Auto-load SQLi detection plugin
-    if (
-      types.some((t) => {
-        const lower = t.toLowerCase();
-        return (
-          lower === "sqli" ||
-          lower === "sql" ||
-          lower === "sql-injection" ||
-          lower.includes("sql")
-        );
-      }) &&
-      !this.hasPlugin("@vulcn/plugin-detect-sqli")
-    ) {
+    // SQLi detection
+    const hasSqli = payloads.types.some((t: string) => {
+      const lower = t.toLowerCase();
+      return lower === "sqli" || lower.includes("sql");
+    });
+    if (hasSqli && !this.hasPlugin("@vulcn/plugin-detect-sqli")) {
       try {
         const pkg = "@vulcn/plugin-detect-sqli";
         const mod = await import(/* @vite-ignore */ pkg);
@@ -350,14 +222,14 @@ export class PluginManager {
       } catch (err) {
         this.errorHandler.catch(err, {
           severity: ErrorSeverity.WARN,
-          source: "plugin-manager:auto-load",
+          source: "plugin-manager:loadFromConfig",
           context: { plugin: "@vulcn/plugin-detect-sqli" },
         });
       }
     }
 
-    // Auto-load passive scanner (opt-out)
-    if (passive && !this.hasPlugin("@vulcn/plugin-passive")) {
+    // Passive scanner
+    if (detection.passive && !this.hasPlugin("@vulcn/plugin-passive")) {
       try {
         const pkg = "@vulcn/plugin-passive";
         const mod = await import(/* @vite-ignore */ pkg);
@@ -365,7 +237,7 @@ export class PluginManager {
       } catch (err) {
         this.errorHandler.catch(err, {
           severity: ErrorSeverity.WARN,
-          source: "plugin-manager:auto-load",
+          source: "plugin-manager:loadFromConfig",
           context: { plugin: "@vulcn/plugin-passive" },
         });
       }

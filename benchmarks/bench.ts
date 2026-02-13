@@ -34,7 +34,11 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { DriverManager, PluginManager } from "@vulcn/engine";
+import {
+  DriverManager,
+  PluginManager,
+  parseProjectConfig,
+} from "@vulcn/engine";
 import type { Session, RunResult, Finding } from "@vulcn/engine";
 import browserDriver from "@vulcn/driver-browser";
 import {
@@ -311,7 +315,21 @@ async function runBenchmark(
 
     // Re-initialize a fresh plugin manager for this batch to ensure clean payload state
     const batchManager = new PluginManager();
-    await batchManager.loadDefaults([payloadType], { passive: false });
+    const batchConfig = parseProjectConfig({
+      payloads: {
+        types: [
+          payloadType as
+            | "xss"
+            | "sqli"
+            | "cmd"
+            | "redirect"
+            | "traversal"
+            | "xxe",
+        ],
+      },
+      detection: { passive: false },
+    });
+    await batchManager.loadFromConfig(batchConfig);
 
     console.log(
       `\n   Running ${category} batch (${categoryCases.length} cases)...`,
