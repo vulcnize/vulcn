@@ -8,30 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@vulcn/driver-browser':
-        specifier: link:./drivers/browser
-        version: link:drivers/browser
-      '@vulcn/engine':
-        specifier: link:.
-        version: 'link:'
-      '@vulcn/plugin-detect-reflection':
-        specifier: link:./plugins/detect-reflection
-        version: link:plugins/detect-reflection
-      '@vulcn/plugin-detect-sqli':
-        specifier: link:./plugins/detect-sqli
-        version: link:plugins/detect-sqli
-      '@vulcn/plugin-detect-xss':
-        specifier: link:./plugins/detect-xss
-        version: link:plugins/detect-xss
-      '@vulcn/plugin-passive':
-        specifier: link:./plugins/passive
-        version: link:plugins/passive
-      '@vulcn/plugin-payloads':
-        specifier: link:./plugins/payloads
-        version: link:plugins/payloads
-      '@vulcn/plugin-report':
-        specifier: link:./plugins/report
-        version: link:plugins/report
       playwright:
         specifier: ^1.50.0
         version: 1.58.1
