@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/plugin-detect-reflection",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Input reflection detection plugin for Vulcn — identifies when attack payloads appear unescaped in HTTP responses, catching output encoding failures and potential injection points.",
   "type": "module",
   "main": "./dist/index.cjs",

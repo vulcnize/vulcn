@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/engine",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "Fast, modern security testing engine — record browser sessions, replay with attack payloads, and detect vulnerabilities automatically. Pluggable driver and detection system for web application penetration testing.",
   "type": "module",
   "main": "./dist/index.cjs",

@@ -1,6 +1,6 @@
 {
   "name": "@vulcn/plugin-passive",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Passive security scanner for Vulcn — detects missing security headers, insecure cookies, information disclosure, CORS misconfigurations, and mixed content without injecting payloads.",
   "type": "module",
   "main": "./dist/index.cjs",
