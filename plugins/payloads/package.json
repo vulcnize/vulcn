@@ -64,7 +64,7 @@
     "@vulcn/engine": "^0.9.0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^25.2.3",
     "@vulcn/engine": "workspace:*",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0"
